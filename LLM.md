@@ -3707,7 +3707,8 @@ $$L_{clip} = min( (\frac{\pi_θ}{\pi_{θ_{old}}})\times \hat{A}_i, clip(\frac{\p
 
 $$L_{KL} = β·KL(π_θ || π_{ref})$$
 
-- **最终目标函数**：$J_{GRPO}(\theta) = L_{clip}+L_{KL}$
+- **最终目标函数**  
+$$J_{GRPO}(\theta) = L_{clip}+L_{KL}$$
 
 #### GRPO vs PPO：三大核心差异
 
