@@ -14,12 +14,11 @@ remainder = english_score % 10            # 取余：2
 square = math_score ** 2  # 85的平方：7225
 
 math_score += 5  # 等同于 math_score = math_score + 5 → 90
-#同理，也有-=, /=, **=之类的
 ```
 
 ## 逻辑运算
 
-```sql
+```python
 attendance_rate = 95.0
 pass_threshold = 90.0
 is_pass = attendance_rate >= pass_threshold  # True
@@ -34,23 +33,17 @@ can_leave = has_homework or (has_exam)  # True or False → False
 ## 逻辑运算——实用操作
 
 1. **Python 的布尔逻辑**
-
-- Python 中任何对元素都可以在判断真假（如 在 `if` 语句中，你可以写 `if (0)` ）。
-- 对象会被转换为 `True` 或 `False`，遵循固定的规则。
+   - Python 中任何对元素都可以在判断真假（如 在 `if` 语句中，你可以写 `if (0)` ）。
+   - 对象会被转换为 `True` 或 `False`，遵循固定的规则。
 
 1. **假值（Falsy Values）规则**
 
-Python 将以下值视为 `False`：
-
-- `None`
-- `False`
-- **数值零**​：`0`（整数）、`0.0`（浮点数）、`0j`（复数 0）
-- **空序列/集合**​：`""`、`[]`、`()`、`{}`、`set()`、`range(0)`
-
----
-
-1. **也就是说，你在判定一个元素是否为 0/一个列表是否为空时​**
-
+    Python 将以下值视为 `False`：
+   - `None`  
+   - `False`  
+   - **数值零**​：`0`（整数）、`0.0`（浮点数）、`0j`（复数 0）  
+   - **空序列/集合**​：`""`、`[]`、`()`、`{}`、`set()`、`range(0)`  
+   - **也就是说，你在判定一个元素是否为 0/一个列表是否为空时​**
 ```
 a=[]
 
@@ -58,9 +51,6 @@ if a :
     print("a非空列表")
 else:
     print("a是空列表")#a是空列表时，if a判定为假，执行else
-```
-
-```
 count = 0
 if count:  # 等价于 if count != 0
     print("Count is non-zero")
@@ -240,11 +230,8 @@ is_empty = False
 ## 字符串常用方法
 
 - **字符串 (str)**​：不可变的 Unicode 字符序列
-  1. 创建字符串
-
-  ```
-  ```
-
+1. 创建字符串
+```
 # 单引号
 
 s1 = 'Hello World'
@@ -262,11 +249,10 @@ string"""
 # 空字符串
 
 empty = ""
-
 ```
-	1. 字符串特性 
+  2. 字符串特性  
 
-- **不可变性**​：字符串创建后不能修改（一般来说就是不能赋值）
+**不可变性**​：字符串创建后不能修改（一般来说就是不能赋值）
 
 ```
 
@@ -275,16 +261,13 @@ s[0] = "H"  # 报错：TypeError
 
 ```
 
-- **序列特性**​：支持索引和切片操作
-	```
+**序列特性**​：支持索引和切片操作
+```
 s = "Python"
 print(s[0])    # 'P' - 索引访问
 print(s[2:5])  # 'tho' - 切片操作
 ```
-
-```
-1. 基本操作 
-```
+3. 基本操作 
 
 ```
 # 连接
@@ -328,7 +311,7 @@ for char in "Hello":
 # o
 ```
 
-### 大小写转换
+大小写转换
 
 ```
 s = "Python Programming"
@@ -339,7 +322,7 @@ print(s.capitalize()) # "Python programming"
 print(s.swapcase())   # "pYTHON pROGRAMMING"
 ```
 
-### 查找与替换
+查找与替换
 
 ```
 s = "Hello World"
@@ -353,7 +336,7 @@ print(s.index("o"))       # 4（类似find，但未找到会报错）
 print(s.replace("World", "Python"))  # "Hello Python"
 ```
 
-### 拆分与连接
+拆分与连接
 
 ```
 # 拆分
@@ -365,7 +348,7 @@ words = ["Python", "is", "awesome"]
 sentence = " ".join(words)  # "Python is awesome"
 ```
 
-### 去除空白
+去除空白
 
 ```
 s = "  Hello World  \n"
@@ -374,7 +357,7 @@ print(s.lstrip())     # "Hello World  \n"（去除左端空白）
 print(s.rstrip())     # "  Hello World"（去除右端空白）
 ```
 
-### 格式化与对齐
+格式化与对齐
 
 ```
 s = "Python"
@@ -388,7 +371,7 @@ print(s.center(10, "-")) # "--Python--"
 print("Value: {:>8}".format(42))  # "Value:       42"
 ```
 
-### 判断方法
+判断方法
 
 ```
 s = "Python3"
@@ -528,7 +511,7 @@ print(t.substitute(name="David"))  # "Hello, David!"
 
 ### 列表创建与基础操作
 
-#### 1. 创建列表
+#### 创建列表
 
 ```
 # 空列表
@@ -540,13 +523,6 @@ numbers = [1, 2, 3, 4, 5]
 mixed = [10, "hello", 3.14, True]
 nested = [[1, 2], [3, 4], [5, 6]]
 ```
-
-#### 2. 列表特性
-
-- **有序性**​：元素保持插入顺序
-- **可变性**​：可以修改元素
-- **异构性**​：可以包含不同类型元素
-- **可重复性**​：元素可以重复
 
 ### 访问列表元素
 
@@ -770,8 +746,6 @@ print([0] * 5)  # [0, 0, 0, 0, 0]
 
 ### 字典创建与基础
 
-1. 创建字典
-
 ```
 # 空字典
 empty_dict = {}
@@ -789,9 +763,6 @@ person = dict([("name", "Alice"), ("age", 30)])
 # 字典推导式
 squares = {x: x*x for x in range(5)}  # {0:0, 1:1, 2:4, 3:9, 4:16}
 ```
-
-1. 字典特性
-
 - **键唯一性**​：键必须是唯一的（重复键会覆盖）
 - **键不可变性**​：键必须是不可变类型（字符串、数字、元组等）
 - **值任意性**​：值可以是任意类型
@@ -799,14 +770,14 @@ squares = {x: x*x for x in range(5)}  # {0:0, 1:1, 2:4, 3:9, 4:16}
 
 ### 访问字典元素
 
-1. 通过键访问
+通过键访问
 
 ```
 person = {"name": "Alice", "age": 30}
 print(person["name"])  # "Alice"
 ```
 
-1. get() 方法（安全访问）
+get() 方法（安全访问）
 
 ```
 print(person.get("age"))       # 30
@@ -814,7 +785,7 @@ print(person.get("address"))   # None（不会引发错误）
 print(person.get("address", "N/A"))  # "N/A"（提供默认值）
 ```
 
-1. 检查键是否存在
+检查键是否存在
 
 ```
 if "name" in person:
@@ -823,26 +794,26 @@ if "name" in person:
 
 ### 添加/修改元素
 
-1. 添加新键值对
+添加新键值对
 
 ```
 person["city"] = "New York"  # {"name": "Alice", "age": 30, "city": "New York"}
 ```
 
-1. 修改现有值
+修改现有值
 
 ```
 person["age"] = 31  # 更新年龄
 ```
 
-1. update() 方法（批量更新）
+update() 方法（批量更新）
 
 ```
 person.update({"age": 32, "city": "Boston"})  # 更新多个值
 person.update([("job", "Engineer"), ("salary", 80000)])  # 使用键值对序列
 ```
 
-1. setdefault() 方法
+setdefault() 方法
 
 ```
 # 如果键存在，返回其值；如果不存在，添加键值对并返回值
@@ -851,27 +822,27 @@ job = person.setdefault("job", "Developer")  # 添加新键值对
 
 ### 删除元素
 
-1. del 语句
+del 语句
 
 ```
 del person["age"]  # 删除键为"age"的项
 ```
 
-1. pop() 方法
+pop() 方法
 
 ```
 age = person.pop("age")  # 删除并返回"age"的值
 age = person.pop("age", None)  # 安全删除，提供默认值
 ```
 
-1. popitem() 方法
+popitem() 方法
 
 ```
 # 删除并返回最后插入的键值对（Python 3.7+）
 key, value = person.popitem()
 ```
 
-1. clear() 方法
+clear() 方法
 
 ```
 person.clear()  # 清空字典 {}
@@ -879,7 +850,7 @@ person.clear()  # 清空字典 {}
 
 ### 遍历字典
 
-1. 遍历键
+遍历键
 
 ```
 for key in person:
@@ -889,14 +860,14 @@ for key in person.keys():
     print(key)
 ```
 
-1. 遍历值
+遍历值
 
 ```
 for value in person.values():
     print(value)
 ```
 
-1. 遍历键值对
+遍历键值对
 
 ```
 for key, value in person.items():
@@ -928,13 +899,13 @@ inverted = {v: k for k, v in squares.items()}
 
 ### 字典排序
 
-1. 按键排序
+按键排序
 
 ```
 sorted_by_key = {k: person[k] for k in sorted(person)}
 ```
 
-1. 按值排序
+按值排序
 
 ```
 sorted_by_value = dict(sorted(person.items(), key=lambda item: item[1]))
@@ -942,7 +913,7 @@ sorted_by_value = dict(sorted(person.items(), key=lambda item: item[1]))
 
 ### 字典好习惯
 
-1. **使用 get()避免 KeyError**​：
+**使用 get()避免 KeyError**​：
 
 ```
 # 不好
@@ -953,27 +924,25 @@ if key in my_dict:
 value = my_dict.get(key, default_value)
 ```
 
-1. **使用字典推导式创建字典**​：
+**使用字典推导式创建字典**​：
 
 ```
 # 优于循环
 squares = {x: x*x for x in range(10)}
 ```
 
-1. **使用 items()同时访问键值**​：
+**使用 items()同时访问键值**​：
 
 ```
 for key, value in my_dict.items():
     # 处理键值对
 ```
 
-1. **使用 f-string 格式化输出**​：
+**使用 f-string 格式化输出**​：
 
 ```
 print(f"Name: {person['name']}, Age: {person['age']}")
 ```
-
-你想了解 Python 中**赋值、浅拷贝、深拷贝**这三种操作针对列表（list）、字典（dict）和集合（set）的核心区别，我会从内存原理到实际案例，用最易懂的方式帮你理清它们的差异。
 
 ## 其他数据类型
 
@@ -1046,16 +1015,11 @@ print("新集合b_set:", b_set)  # {1, 2, 3, 4}
 
 浅拷贝会创建新的容器对象，但容器内的**嵌套可变元素**仍与原对象共享引用（不可变元素如 int/str 修改时会重新赋值，不影响原对象）。
 
-<table>
-<tr>
-<td>数据类型<br/></td><td>浅拷贝方法<br/></td></tr>
-<tr>
-<td>list<br/></td><td>`list.copy()`、`list(原列表)`、`原列表[:]`<br/></td></tr>
-<tr>
-<td>dict<br/></td><td>`dict.copy()`、`dict(原字典)`<br/></td></tr>
-<tr>
-<td>set<br/></td><td>`set.copy()`、`set(原集合)`<br/></td></tr>
-</table>
+| 数据类型 | 浅拷贝方法 |
+|---| ---|
+| list|`list.copy()`、`list(原列表)`、`原列表[:]`|
+|dict|`dict.copy()`、`dict(原字典)`|
+|set|`set.copy()`、`set(原集合)`|
 
 ```python
 # 1. 列表浅拷贝（嵌套可变元素共享）
@@ -1149,9 +1113,9 @@ set([1,1,2])    # {1,2}
 
 ### **类 = 班级的模板（蓝图）​**
 
-- **类** 定义了共同的特征和行为规则，就像学校制定的 **《班级管理手册》**​：
-  - **属性**​：手册里规定了班级应有的特征（如班级名称、班主任、教室位置）。
-  - **方法**​：手册里还规定了班级能做什么（如上课、考试、开班会）。
+**类** 定义了共同的特征和行为规则，就像学校制定的 **《班级管理手册》**​：  
+**属性**​：手册里规定了班级应有的特征（如班级名称、班主任、教室位置）。  
+**方法**​：手册里还规定了班级能做什么（如上课、考试、开班会）。
 
 ```
 # 定义一个"班级"的模板（类）
@@ -1176,8 +1140,8 @@ class Classroom:
 
 ### **对象 = 具体的班级**
 
-- 根据模板创建 **具体的班级**​（对象），每个班级有自己独立的数据：
-  - `class_301` 和 `class_302` 是两个不同的对象，就像学校里真实的两个班级。
+根据模板创建 **具体的班级**​（对象），每个班级有自己独立的数据：
+`class_301` 和 `class_302` 是两个不同的对象，就像学校里真实的两个班级。
 
 ```
 # 创建两个具体的班级（对象）
@@ -1196,7 +1160,7 @@ class_302.hold_exam()  # 输出: "三年级二班正在考试！"
 
 ## 类的基本概念
 
-1. 类与对象的关系
+类与对象的关系
 
 - **类（Class）​**​：对象的模板或蓝图
 - **对象（Object）​**​：类的具体实例
@@ -1212,7 +1176,7 @@ class Dog:
 my_dog = Dog()
 ```
 
-1. 为什么使用类？
+为什么使用类？
 
 - **封装**​：将数据和操作数据的方法绑定在一起
 - **继承**​：创建层次化的类关系，实现代码重用
@@ -1220,15 +1184,12 @@ my_dog = Dog()
 - **抽象**​：隐藏复杂实现细节，提供简单接口
 
 ## 定义类的基本结构
-
-1. 最简单的类
-
 ```
 class EmptyClass:
     pass
 ```
 
-1. 包含属性和方法的类
+包含属性和方法的类:
 
 特别注意，def __init__(self, name, age)是每个类必须有的东西（还是一个函数，name 和 age 都是在外面给定的）
 
@@ -1253,7 +1214,7 @@ class Dog:
 
 ## 创建和使用对象
 
-1. 实例化对象
+### 实例化对象
 
 你看，这里 Dog("Buddy", 5)，Dog 实际上就是你之前定义好的"类"，当你用 Dog()这样调用时，就生成了一个具体的 Dog,输入参数第一个被赋值为 self.name，名叫"Buddy"
 
@@ -1262,7 +1223,7 @@ my_dog = Dog("Buddy", 5)
 your_dog = Dog("Lucy", 3)
 ```
 
-1. 访问属性
+### 访问属性
 
 ```
 print(my_dog.name)        # "Buddy"
@@ -1270,7 +1231,7 @@ print(my_dog.age)         # 5
 print(my_dog.species)     # "Canis familiaris"
 ```
 
-1. 调用方法
+### 调用方法
 
 ```
 print(my_dog.bark())      # "Buddy says Woof!"
@@ -1293,7 +1254,7 @@ class Person:
         self.created_at = datetime.now()  # 设置创建时间
 ```
 
-1. 实例方法
+2. 实例方法
 
 - 第一个参数总是 `self`（表示当前对象）
 - 可以访问和修改对象属性
@@ -1311,7 +1272,7 @@ class Circle:
         return 2 * 3.14 * self.radius
 ```
 
-1. 类属性 vs 实例属性
+3. 类属性 vs 实例属性
 
 ```
 class Car:
@@ -1341,7 +1302,6 @@ print(car2.wheels) # 6（类属性不变）
 
 ## 继承：代码重用的核心机制
 
-1. 基本继承
 
 ```
 class Animal:
@@ -1381,7 +1341,7 @@ class Car(Vehicle):
         return f"Driving a {self.brand} car"
 ```
 
-1. 使用 `super()` 调用父类方法
+2. 使用 `super()` 调用父类方法
 
 ```
 class ElectricCar(Car):
@@ -1416,7 +1376,7 @@ print(p)        # Alice (30 years old) - 调用 __str__
 print(repr(p))  # Person('Alice', 30) - 调用 __repr__
 ```
 
-1. 比较运算符
+2. 比较运算符
 
 ```
 class Vector:
@@ -1431,7 +1391,7 @@ class Vector:
         return (self.x**2 + self.y**2) < (other.x**2 + other.y**2)
 ```
 
-1. 数学运算符
+3. 数学运算符
 
 ```
 class Vector:
@@ -1467,7 +1427,7 @@ print(iphone.take_photo())  # "Taking photo"
 print(iphone.make_call())   # "Making call"
 ```
 
-1. 数据类（Python 3.7+）
+2. 数据类（Python 3.7+）
 
 ```
 from dataclasses import dataclass
@@ -1517,7 +1477,7 @@ class Person:
         self._age = value
 ```
 
-1. **优先使用组合而不是继承**​：
+3. **优先使用组合而不是继承**​：
 
 ```
 # 使用组合
@@ -1537,7 +1497,7 @@ class Car(Engine):  # 不自然的关系
     pass
 ```
 
-1. **使用类型提示（Python 3.5+）​**​：
+4. **使用类型提示（Python 3.5+）​**​：
 
 ```
 class Vector:
@@ -1549,7 +1509,7 @@ class Vector:
         return Vector(self.x + other.x, self.y + other.y)
 ```
 
-1. **文档字符串（Docstrings）​**​：
+5. **文档字符串（Docstrings）​**​：
 
 ```
 class Calculator:
