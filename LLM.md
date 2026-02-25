@@ -3821,7 +3821,7 @@ GSPO沿用GRPO的组相对优势思想，但**仅做均值中心化，不除以�
 
 1. 序列级几何平均重要性比率（GSPO核心创新）
 
-重要性比率用于衡量“当前策略”与“旧策略”生成同一序列的概率差异，GSPO将token级比率聚合为**序列级几何平均**
+重要性比率用于衡量“当前策略”与“旧策略”生成同一序列的概率差异，GSPO将token级比率聚合为**序列级几何平均**  
 
 $$s_i(\theta) = \left( \frac{\pi_\theta(y_i \vert x)}{\pi_{\theta_{\text{old}}}(y_i \vert x)} \right)^{1/T_i} = \exp\left( \frac{1}{T_i}\sum_{t=1}^{T_i}\log\frac{\pi_\theta(y_{i,t} \vert x, y_{i,<t})}{\pi_{\theta_{\text{old}}}(y_{i,t} \vert x, y_{i,<t})} \right)$$
 
