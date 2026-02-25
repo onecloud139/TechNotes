@@ -83,7 +83,7 @@ $$
 Attention(Q,K,V)=softmax(\frac{QK^T}{\sqrt{d_k}})V
 $$
 
-- **缩放点积**​：除以$\sqrt{d_k}$防止点积结果过大导致 Softmax 梯度饱和。
+- **缩放点积**​：除以 $\sqrt{d_k}$ 防止点积结果过大导致 Softmax 梯度饱和。
 - **多头注意力**​：将 Q、K、V 投影到多个子空间，并行执行注意力计算后再融合。这使得模型能从**不同表示子空间**联合关注信息，例如同时关注语法结构和语义关系，增强模型表达能力。
 
 1. **位置编码**
@@ -139,36 +139,28 @@ Transformer 的 Encoder 是一个功能强大的组件，其核心任务是将�
 
 1. **输入嵌入**​： 将每个输入词元（如单词）转换为一个向量。
 
-   - $$
-     X_{embed}=Lookup(Input)
-     $$
+   - $X_{embed}=Lookup(Input)$
    - 维度： `[seq_len, d_model]`
-2. **位置编码**​： 由于自注意力机制本身没有位置信息，需要注入序列的顺序信息。
+1. **位置编码**​： 由于自注意力机制本身没有位置信息，需要注入序列的顺序信息。
 
    - PE： 使用正弦余弦函数或可学习参数生成的位置编码矩阵。
-   - $$
-     X_{in}=X_{embed}+PE
-     $$
+   - $X_{in}=X_{embed}+PE$
    - 维度： `[seq_len, d_model]`
    - $X_{in}$将作为第一层 Encoder 的输入。
 
 #### 步骤 2：单层 Encoder 的内部计算
 
-令第 l 层的输入为$H_i$，其中 $H_0=X_{in}$。
+令第 l 层的输入为 $H_i$，其中 $H_0=X_{in}$。
 
 **子层 1：多头自注意力**
 
 1. **查询、键、值投影**​： 对于每个注意力头，将输入$H_i$线性投影到三个不同的空间。
 
-   - $$
-     Q_i=H_iW_{Q_i},K_i=H_iW_{K_i},V_i=H_iW_{V_i}
-     $$
+   -  $Q_i=H_iW_{Q_i},K_i=H_iW_{K_i},V_i=H_iW_{V_i}$
    - 维度： `[seq_len, d_k]`(通常 `d_k = d_v = d_model / num_heads`)
 2. **缩放点积注意力**​： 计算每个头内部的注意力。
 
-   $$
-   ttention(Q,K,V)=softmax(\frac{QK^T}{\sqrt{d_k}})V
-   $$
+$$ Attention(Q,K,V)=softmax(\frac{QK^T}{\sqrt{d_k}})V $$
 
    - 公式解释：
      - $QK^T$： 计算每个词元作为“查询”时，与所有词元作为“键”的相似度得分矩阵。
@@ -177,18 +169,12 @@ Transformer 的 Encoder 是一个功能强大的组件，其核心任务是将�
      - softmax(...)V： 使用权重对“值”向量进行加权求和，得到每个词元新的上下文感知表示。
 3. **多头拼接与投影**​： 将所有头的输出拼接起来，再做一个线性变换。
 
-   - $$
-     MultiHead(Q,K,V)=Concat(head_1,...,head_h)W_O
-     $$
-   - $$
-     head_i=Attention(Q_i,K_i,V_i)
-     $$
+   -  $MultiHead(Q,K,V)=Concat(head_1,...,head_h)W_O$
+   -  $head_i=Attention(Q_i,K_i,V_i)$
    - 维度： 输出变回 `[seq_len, d_model]`
 4. **残差连接与层归一化**​：
 
-   - $$
-     Z_1^l=LayerNorm(H_l+MultiHead(H_lW_{Q_l},H_lW_{K_l},H_lW_{V_l}))
-     $$
+   -  $Z_1^l=LayerNorm(H_l+MultiHead(H_lW_{Q_l},H_lW_{K_l},H_lW_{V_l}))$
    - 注意：在自注意力中，Q, K, V 都来自同一来源 $H_l$，故称“自”注意力。
 
 **子层 2：前馈神经网络**
@@ -197,25 +183,19 @@ Transformer 的 Encoder 是一个功能强大的组件，其核心任务是将�
 
 1. **前馈计算**​：
 
-   - $$
-     FFN(x)=max(0,xW_1+b_1)W_2+b_2
-     $$
-   - 通常中间层的维度会扩大，如$ d_{ff}=4×d_{model}$，然后再投影回 $d_{model}$。
-   - FFN(Z1l)的维度： `[seq_len, d_model]`
+   -  $FFN(x)=max(0,xW_1+b_1)W_2+b_2$
+   - 通常中间层的维度会扩大，如 $d_{ff}=4×d_{model}$，然后再投影回 $d_{model}$。
+   -  $FFN(Z_1^l)$的维度： `[seq_len, d_model]`
 2. **残差连接与层归一化**​：
 
-   - $$
-     H_{l+1}=LayerNorm(Z_1^l+FFN(Z_1^l))
-     $$
-   - $H_{l+1}$将作为下一层（第 l+1 层）的输入。
+   -  $H_{l+1}=LayerNorm(Z_1^l+FFN(Z_1^l))$
+   -  $H_{l+1}$将作为下一层（第 l+1 层）的输入。
 
 #### 步骤 3：堆叠与输出
 
 重复步骤 2 共 N 次。最终，第 N 层的输出 HN 就是整个 Encoder 的最终输出。
 
-- $$
-  EncoderOutput=H_N
-  $$
+-  $EncoderOutput=H_N$
 - 维度： `[seq_len, d_model]`
 
 这个输出是一个丰富的表示矩阵，其中每个行向量都包含了整个输入序列的上下文信息。它可以被送入 Decoder（在原始 Transformer 中用于翻译），或者直接用于各种任务（如文本分类、BERT 等）。
@@ -248,11 +228,11 @@ Decoder 的输入是**目标序列的右移版本**​（Shifted Right）。
 - 训练时：将目标序列向右移动一位，并在开头添加起始符 `<sos>`
 - 推理时：从起始符开始，逐个生成
 
-输入经过嵌入和位置编码后得到：$H_{dec}^0$
+输入经过嵌入和位置编码后得到: $H_{dec}^0$
 
 #### 步骤 2：单层 Decoder 的内部计算
 
-令第$l$层 Decoder 的输入为 $H_{dec}^l$，编码器的最终输出为 $H_{enc}^N$。
+令第 $l$层 Decoder 的输入为 $H_{dec}^l$，编码器的最终输出为 $H_{enc}^N$。
 
 **子层 1：掩码多头自注意力**
 
@@ -264,13 +244,14 @@ $$
 MaskedAttention(Q,K,V)=softmax(\frac{QK^T}{\sqrt{d_k}}+M)V
 $$
 
-1. 其中掩码矩阵 M 定义为：
+2. 其中掩码矩阵 M 定义为：
 
 $$
-M_{ij}=0,(i≥j,允许关注当前和之前的位置)\\−∞,(i<j,禁止关注未来的位置)
+M_{ij}=0,(i≥j,允许关注当前和之前的位置)\\
+−∞,(i<j,禁止关注未来的位置)
 $$
 
-1. **残差连接与层归一化**​：
+3. **残差连接与层归一化**​：
 
 $$
 Z_1^l=LayerNorm(H_{dec}^l+MaskedMultiHead(Q_{dec}^l,K_{dec}^l,V_{dec}^l))
@@ -311,7 +292,7 @@ $$
 
 经过 N 层 Decoder 后，最终输出$H_{dec}^N$通过一个线性层和 Softmax 生成下一个词的概率分布。
 
-$$
+ $$
 P(y_t∣y_{<t},X)=softmax(H_{dec}^NW_{vocab}+b_{vocab})
 $$
 
@@ -3819,7 +3800,7 @@ GRPO的奖励评估在**序列级**，但优化更新在**token级**，这种错
 
 GSPO沿用GRPO的组相对优势思想，但**仅做均值中心化，不除以标准差**（几何平均已天然压缩方差，标准化冗余）。
 
-1. 序列级几何平均重要性比率（GSPO核心创新）
+2. 序列级几何平均重要性比率（GSPO核心创新）
 
 重要性比率用于衡量“当前策略”与“旧策略”生成同一序列的概率差异，GSPO将token级比率聚合为**序列级几何平均**  
 
@@ -3830,7 +3811,7 @@ $$s_i(\theta) = \left( \frac{\pi_\theta(y_i \vert x)}{\pi_{\theta_{\text{old}}}(
 	2. 几何平均+长度归一化（$\frac{1}{T_i}$）：消除序列长度对比率的影响，同时压缩token级极端值的方差；
 	3. 对数变换：将乘积转化为求和，避免数值下溢。
 
-1. GSPO目标函数（序列级剪辑）
+3. GSPO目标函数（序列级剪辑）
 
 目标函数通过**剪辑操作**限制策略更新幅度，防止训练震荡，公式：
 
@@ -3853,7 +3834,7 @@ $$R_{g,j}^{\text{out}} = S_{g,j}^{\text{format}} + S_{g,j}^{\text{exec}}$$
 - **执行分数（**$S_{g,j}^{\text{exec}}$**）**：基于Jaccard相似度与参数匹配度的归一化分数，公式为：
 	$$S_{g,j}^{\text{exec}} = \frac{r_{\text{name}} + r_{\text{para}} + r_{\text{value}}}{1 + |T| + \sum_{T_i \in T} |v(T_i)|}$$
 
-1. 混合奖励$R_{g,j}^{\text{mix}}$：**结果奖励+LLM评判的推理奖励**
+2. 混合奖励$R_{g,j}^{\text{mix}}$：**结果奖励+LLM评判的推理奖励**
 
 $$R_{g,j}^{\text{mix}} = R_{g,j}^{\text{out}} + R_{g,j}^{\text{reasoning}}$$
 
@@ -3863,7 +3844,7 @@ $$R_{g,j}^{\text{mix}} = R_{g,j}^{\text{out}} + R_{g,j}^{\text{reasoning}}$$
 
 - **提示词设计**：采用结构化、多维度评分标准，要求输出单一JSON对象{\"score\": X.XX}，避免解释性文本
 
-1. 方差感知门控（Variance-Aware Gating）
+3. 方差感知门控（Variance-Aware Gating）
 
 **核心思想**：仅在结果奖励的区分能力不足时（方差小），才引入推理奖励信号，避免干扰主要优化目标。
 
@@ -3877,7 +3858,7 @@ $$g_g = \begin{cases}
 
 - 最终优势信号：$A_{g,j} = A_{g,j}^{\text{out}} + g_g \cdot w_g \cdot A_{g,j}^{\text{mix}}$
 
-1. 难度感知加权（Difficulty-Aware Weighting）
+4. 难度感知加权（Difficulty-Aware Weighting）
 
 **核心思想**：优先学习中等难度提示，这些样本的优化潜力最大
 
@@ -3887,7 +3868,7 @@ $$w_g = \exp\left(-\alpha \cdot \left|\frac{\overline{R}_g^{\text{out}} - \mu_R}
 
 - 效果：中等难度样本权重接近1，过难/过易样本权重趋近0
 
-1. 动态裁剪（Dynamic Clipping）
+5. 动态裁剪（Dynamic Clipping）
 
 **核心思想**：根据组内优势信号的统计特性调整裁剪范围，平衡稳定性与探索性。
 
@@ -3903,7 +3884,7 @@ $
 		$$\overline{w}_B = \frac{1}{G} \sum_{g=1}^G w_g^{\text{mix}}$$
 		$$s_g = \varepsilon_{\text{min}} + (1 - \overline{w}_B) \cdot (\varepsilon_{\text{max}} - \varepsilon_{\text{min}})$$
 
-1. 损失函数
+6. 损失函数
 
 AWPO的目标函数基于PPO的clip机制，结合了加权优势信号：
 
