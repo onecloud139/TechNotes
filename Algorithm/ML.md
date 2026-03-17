@@ -10,11 +10,11 @@
 
 -   **基本概念**
 
-    -   训练数据：$\mathcal{D} = \{(\mathbf{x}_i, y_i)\}_{i=1}^N$，包含输入-输出对
+    -   训练数据： $\mathcal{D} = \{(\mathbf{x}_i, y_i)\}_{i=1}^N$ ，包含输入-输出对
 
-    -   目标：学习映射函数 $f: \mathcal{X} \rightarrow \mathcal{Y}$
+    -   目标：学习映射函数  $f: \mathcal{X} \rightarrow \mathcal{Y}$ 
 
-    -   损失函数：$\mathcal{L} = \frac{1}{N} \sum_{i=1}^N \ell(f(\mathbf{x}_i), y_i)$
+    -   损失函数： $\mathcal{L} = \frac{1}{N} \sum_{i=1}^N \ell(f(\mathbf{x}_i), y_i)$ 
 
 -   **任务类型**
 
@@ -34,7 +34,7 @@
 
 -   **基本概念**
 
-    -   训练数据：$\mathcal{D} = \{\mathbf{x}_i\}_{i=1}^N$，仅含输入特征
+    -   训练数据： $\mathcal{D} = \{\mathbf{x}_i\}_{i=1}^N$ ，仅含输入特征
 
     -   目标：发现数据中的隐藏结构和模式
 
@@ -56,12 +56,12 @@
 
 -   **基本概念**
 
-    -   训练数据：$\mathcal{D} = \mathcal{D}_L \cup \mathcal{D}_U$
+    -   训练数据： $\mathcal{D} = \mathcal{D}_L \cup \mathcal{D}_U$ 
 
-    -   其中 $\mathcal{D}_L = \{(\mathbf{x}_i, y_i)\}_{i=1}^L$
+    -   其中  $\mathcal{D}_L = \{(\mathbf{x}_i, y_i)\}_{i=1}^L$ 
         为标注数据
 
-    -   $\mathcal{D}_U = \{\mathbf{x}_j\}_{j=1}^U$ 为未标注数据，通常
+    -    $\mathcal{D}_U = \{\mathbf{x}_j\}_{j=1}^U$  为未标注数据，通常
         $U \gg L$
 
 -   **核心假设**
@@ -104,18 +104,22 @@
 
 -   **L0 正则化**\
     惩罚模型中非零权重的数量（即直接限制参数的数量）。\
-    公式：$J(\mathbf{w}) = \text{Original Loss} + \lambda \|\mathbf{w}\|_0$，其中
-    $\|\mathbf{w}\|_0$ 是 $\mathbf{w}$ 中非零元素的个数。\
+    公式： $J(\mathbf{w}) = \text{Original Loss} + \lambda \|\mathbf{w}\|_0$ ，其中
+     $\|\mathbf{w}\|_0$  是  $\mathbf{w}$  中非零元素的个数。\
     **缺点：** 优化是一个NP难问题，难以求解。
 
 -   **L1 正则化 (Lasso Regression)**\
     惩罚权重的绝对值之和。倾向于产生稀疏权重矩阵，即产生少量特征权重不为零，其他都为零，因此可用于特征选择。
+
     $$J(\mathbf{w}) = \text{Original Loss} + \lambda \|\mathbf{w}\|_1 = \text{Original Loss} + \lambda \sum_{j=1}^{n} |w_j|$$
 
 -   **L2 正则化 (Ridge Regression)**\
     惩罚权重的平方和。使得所有权重值均向零缩小，但通常不会等于零。
+
     $$J(\mathbf{w}) = \text{Original Loss} + \lambda \|\mathbf{w}\|_2^2 = \text{Original Loss} + \lambda \sum_{j=1}^{n} w_j^2$$
+
     在逻辑回归中，添加L2正则化后的损失函数为：
+
     $$J(\mathbf{w}) = -\frac{1}{m} \sum_{i=1}^{m} [y^{(i)} \log(h_{\mathbf{w}}(\mathbf{x}^{(i)})) + ...] + \frac{\lambda}{2m} \sum_{j=1}^{n} w_j^2$$
 
 ## 梯度法 (Gradient-based Methods)
@@ -126,10 +130,10 @@
     沿损失函数梯度（导数）的反方向（即最陡下降方向）更新参数，以逐步减小损失函数值。
 
 -   **参数更新公式（基本形式）:**
+
     $$\mathbf{w} := \mathbf{w} - \alpha \cdot \nabla_{\mathbf{w}} J(\mathbf{w})$$
-    其中 $\alpha$ 是学习率 (Learning
-    Rate)，控制每次更新的步长；$\nabla_{\mathbf{w}} J(\mathbf{w})$
-    是损失函数关于参数 $\mathbf{w}$ 的梯度。
+
+    其中  $\alpha$  是学习率 (Learning Rate)，控制每次更新的步长；  $\nabla_{\mathbf{w}} J(\mathbf{w})$  是损失函数关于参数  $\mathbf{w}$  的梯度。
 
 -   **常见变体：**
 
@@ -152,6 +156,7 @@
     的二进制向量来表示。向量中只有一位为1（对应样本所属的类别），其余位均为0。
 
 -   **示例：** 假设特征"颜色"有3个类别：红、绿、蓝。 
+
 $$\begin{aligned}
             \text{红} &\rightarrow [1, 0, 0] \\
             \text{绿} &\rightarrow [0, 1, 0] \\
