@@ -135,98 +135,153 @@ SELECT column FROM table_a INTERSECT SELECT column FROM table_b;  -- 交集
 SELECT column FROM table_a EXCEPT SELECT column FROM table_b;     -- 差集（Oracle 用 MINUS）
 ```
 
-
 ### 2.2 窗口函数 (Window Functions)
 
-#### 基本语法
+#### 核心概念与语法结构
+窗口函数对一组行（称为"窗口"）进行计算，并为每行返回一个结果。与聚合函数不同，窗口函数不会将行合并为单行。
+
 ```sql
-函数名() OVER (
-    [PARTITION BY 分组列]
-    [ORDER BY 排序列]
-    [ROWS/RANGE BETWEEN 窗口范围]
-)
+函数名([参数]) OVER (
+    [PARTITION BY 分区列1, 分区列2, ...]  -- 定义窗口分区（类似GROUP BY）
+    [ORDER BY 排序列1 [ASC|DESC], ...]     -- 定义窗口内排序
+    [帧定义窗口范围]                          -- 定义计算范围（滑动窗口）
+) AS alias
 ```
 
-#### 排名函数
+**执行顺序**：FROM → WHERE → GROUP BY → HAVING → SELECT(窗口函数在此执行) → ORDER BY → LIMIT
+
+#### 帧定义（Frame Specification）详解
+控制窗口内计算的行范围，默认是 `RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW`。
+
 ```sql
--- 行号（连续不重复）
-SELECT 
-    name,
-    salary,
-    ROW_NUMBER() OVER (ORDER BY salary DESC) as rn
-FROM employees;
+-- 行边界模式
+ROWS UNBOUNDED PRECEDING                    -- 从分区第一行到当前行
+ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW  -- 同上（显式写法）
+ROWS BETWEEN 2 PRECEDING AND CURRENT ROW    -- 前2行 + 当前行（共3行）
+ROWS BETWEEN CURRENT ROW AND 2 FOLLOWING    -- 当前行 + 后2行（共3行）
+ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING    -- 前1行 + 当前行 + 后1行（共3行）
+ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING  -- 整个分区所有行
 
--- 排名（跳号，相同值同排名）
-SELECT 
-    name,
-    salary,
-    RANK() OVER (ORDER BY salary DESC) as rk,
-    DENSE_RANK() OVER (ORDER BY salary DESC) as drk  -- 密集排名（不跳号）
-FROM employees;
+-- 值范围模式（处理重复值）
+RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW  -- 所有值小于等于当前行的行
+RANGE BETWEEN INTERVAL '1' DAY PRECEDING AND CURRENT ROW  -- 时间范围（Oracle/PostgreSQL）
+```
 
--- 分组排名（每个部门内排名）
+#### 排名函数（Ranking Functions）
+```sql
+-- ROW_NUMBER(): 连续唯一编号（1,2,3,4...）
 SELECT 
     department,
     name,
     salary,
-    ROW_NUMBER() OVER (PARTITION BY department ORDER BY salary DESC) as dept_rn
+    ROW_NUMBER() OVER (ORDER BY salary DESC) as global_rank,  -- 全局排名
+    ROW_NUMBER() OVER (PARTITION BY department ORDER BY salary DESC) as dept_rank  -- 部门内排名
 FROM employees;
-```
 
-#### 偏移函数（取值）
-```sql
--- 前后行取值
+-- RANK(): 排名（跳号，相同值同排名，下一名次跳过）
+-- DENSE_RANK(): 密集排名（不跳号）
 SELECT 
     name,
     salary,
-    LAG(salary, 1) OVER (ORDER BY id) as prev_salary,    -- 上一行
-    LEAD(salary, 1) OVER (ORDER BY id) as next_salary,   -- 下一行
-    salary - LAG(salary, 1) OVER (ORDER BY id) as diff   -- 差值计算
+    RANK() OVER (ORDER BY salary DESC) as rank_num,         -- 1,1,3,4,4,6...
+    DENSE_RANK() OVER (ORDER BY salary DESC) as dense_rank, -- 1,1,2,3,3,4...
+    ROW_NUMBER() OVER (ORDER BY salary DESC) as row_num      -- 1,2,3,4,5,6...
 FROM employees;
 
--- 首尾取值
+-- PERCENT_RANK(): 相对排名百分比（0到1之间）
+-- CUME_DIST(): 累积分布（当前行值小于等于它的行数占总行数的比例）
 SELECT 
     name,
     salary,
-    FIRST_VALUE(salary) OVER (ORDER BY salary) as lowest,
-    LAST_VALUE(salary) OVER (ORDER BY salary ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) as highest
+    PERCENT_RANK() OVER (ORDER BY salary DESC) as pct_rank,  -- (rank-1)/(总行数-1)
+    CUME_DIST() OVER (ORDER BY salary DESC) as cum_dist      -- 小于等于当前值的行数/总行数
+FROM employees;
+
+-- NTILE(n): 将分区分为n个桶（分位数）
+SELECT 
+    name,
+    salary,
+    NTILE(4) OVER (ORDER BY salary DESC) as quartile,   -- 四分位数（1,2,3,4）
+    NTILE(10) OVER (ORDER BY salary DESC) as decile     -- 十分位数
 FROM employees;
 ```
 
-#### 聚合窗口函数（累计计算）
+#### 偏移函数（Value Functions / Navigation Functions）
 ```sql
--- 累计求和/平均
+-- LAG/LEAD: 访问前后行的数据
 SELECT 
     year,
     month,
     amount,
-    SUM(amount) OVER (ORDER BY year, month) as cum_sum,           -- 累计收入
-    AVG(amount) OVER (ORDER BY year, month ROWS 6 PRECEDING) as moving_avg  -- 移动平均（近7个月）
+    -- LAG(列名, 偏移量, 默认值) 默认值在超出范围时返回
+    LAG(amount, 1, 0) OVER (ORDER BY year, month) as prev_month,
+    LEAD(amount, 1, 0) OVER (ORDER BY year, month) as next_month,
+    amount - LAG(amount, 1) OVER (ORDER BY year, month) as diff,
+    -- 计算增长率
+    (amount - LAG(amount, 1) OVER (ORDER BY year, month)) / 
+        NULLIF(LAG(amount, 1) OVER (ORDER BY year, month), 0) * 100 as growth_rate
 FROM sales;
 
--- 分组聚合（每组的总计/平均）
+-- FIRST_VALUE/LAST_VALUE: 窗口内第一个/最后一个值
+-- NTH_VALUE: 窗口内第n个值
 SELECT 
     department,
     name,
     salary,
-    SUM(salary) OVER (PARTITION BY department) as dept_total,     -- 部门总工资
-    salary / SUM(salary) OVER (PARTITION BY department) as ratio,   -- 占比
-    AVG(salary) OVER (PARTITION BY department) as dept_avg          -- 部门平均
+    FIRST_VALUE(name) OVER (PARTITION BY department ORDER BY salary DESC) as highest_paid,
+    LAST_VALUE(name) OVER (
+        PARTITION BY department 
+        ORDER BY salary DESC 
+        ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+    ) as lowest_paid,
+    NTH_VALUE(name, 3) OVER (
+        PARTITION BY department 
+        ORDER BY salary DESC
+        ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+    ) as third_highest
 FROM employees;
 ```
 
-#### 窗口边界控制
+#### 聚合窗口函数（Aggregate Window Functions）
 ```sql
--- 行范围控制
-ROWS UNBOUNDED PRECEDING          -- 从分区第一行到当前行
-ROWS BETWEEN 2 PRECEDING AND CURRENT ROW  -- 前2行到当前行（共3行）
-ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING  -- 当前行到最后一行
-RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW -- 值范围（相同值视为一行）
+-- 累计计算（Running Totals）
+SELECT 
+    date,
+    daily_sales,
+    SUM(daily_sales) OVER (ORDER BY date) as cum_sum,  -- 累计销售额
+    SUM(daily_sales) OVER (ORDER BY date ROWS BETWEEN 6 PRECEDING AND CURRENT ROW) as week_sum, -- 近7天
+    AVG(daily_sales) OVER (ORDER BY date ROWS BETWEEN 29 PRECEDING AND CURRENT ROW) as month_avg  -- 近30天平均
+FROM sales;
+
+-- 分组聚合占比
+SELECT 
+    department,
+    name,
+    salary,
+    SUM(salary) OVER (PARTITION BY department) as dept_total,
+    salary * 1.0 / SUM(salary) OVER (PARTITION BY department) as dept_ratio,
+    AVG(salary) OVER (PARTITION BY department) as dept_avg,
+    MAX(salary) OVER (PARTITION BY department) as dept_max,
+    MIN(salary) OVER (PARTITION BY department) as dept_min,
+    COUNT(*) OVER (PARTITION BY department) as dept_count,
+    -- 与部门平均的差值
+    salary - AVG(salary) OVER (PARTITION BY department) as diff_from_avg
+FROM employees;
+
+-- 全局占比（不指定PARTITION BY）
+SELECT 
+    product,
+    sales,
+    SUM(sales) OVER () as total_sales,
+    sales * 1.0 / SUM(sales) OVER () as pct_of_total
+FROM product_sales;
 ```
 
-#### 实用场景示例
+#### 高级实用场景
+
+**场景1：Top-N 问题（每组取前N条）**
 ```sql
--- 场景1：Top-N 问题（每组取前N条）
+-- 方法1：使用ROW_NUMBER()
 SELECT * FROM (
     SELECT 
         department,
@@ -234,27 +289,112 @@ SELECT * FROM (
         salary,
         ROW_NUMBER() OVER (PARTITION BY department ORDER BY salary DESC) as rn
     FROM employees
-) t WHERE rn <= 3;  -- 每个部门工资前3名
+) t WHERE rn <= 3;
 
--- 场景2：同比环比（与上月/上年比较）
-SELECT 
-    year,
-    month,
-    amount,
-    LAG(amount, 1) OVER (ORDER BY year, month) as last_month,
-    LAG(amount, 12) OVER (ORDER BY year, month) as last_year,
-    (amount - LAG(amount, 1) OVER (ORDER BY year, month)) / LAG(amount, 1) OVER (ORDER BY year, month) as mom_growth
-FROM monthly_sales;
+-- 方法2：使用RANK()（处理并列情况）
+SELECT * FROM (
+    SELECT 
+        department,
+        name,
+        salary,
+        RANK() OVER (PARTITION BY department ORDER BY salary DESC) as rk
+    FROM employees
+) t WHERE rk <= 3;  -- 如果有并列第3，都会包含进来
+```
 
--- 场景3：去重保留最新（保留每个用户最新记录）
+**场景2：去重保留最新记录（保留每个用户最新记录）**
+```sql
+-- 方法1：保留最新一条
 SELECT * FROM (
     SELECT 
         *,
         ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY updated_at DESC) as rn
     FROM user_logs
 ) t WHERE rn = 1;
+
+-- 方法2：标记所有最新记录（处理时间戳相同的情况）
+SELECT * FROM (
+    SELECT 
+        *,
+        RANK() OVER (PARTITION BY user_id ORDER BY updated_at DESC) as rk
+    FROM user_logs
+) t WHERE rk = 1;
 ```
 
+**场景3：同比环比计算（YoY/MoM）**
+```sql
+SELECT 
+    year,
+    month,
+    amount,
+    -- 环比（与上月比）
+    LAG(amount, 1) OVER (ORDER BY year, month) as last_month,
+    (amount - LAG(amount, 1) OVER (ORDER BY year, month)) / 
+        NULLIF(LAG(amount, 1) OVER (ORDER BY year, month), 0) as mom_growth,
+    -- 同比（与上年同月比）
+    LAG(amount, 12) OVER (ORDER BY year, month) as last_year,
+    (amount - LAG(amount, 12) OVER (ORDER BY year, month)) / 
+        NULLIF(LAG(amount, 12) OVER (ORDER BY year, month), 0) as yoy_growth,
+    -- 年初至今累计（YTD）
+    SUM(amount) OVER (PARTITION BY year ORDER BY month) as ytd_amount
+FROM monthly_sales;
+```
+
+**场景4：连续区间识别（Gaps and Islands问题）**
+```sql
+-- 识别连续登录天数
+WITH login_with_grp AS (
+    SELECT 
+        user_id,
+        login_date,
+        DATE_SUB(login_date, INTERVAL 
+            ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY login_date) DAY
+        ) as grp
+    FROM user_logins
+)
+SELECT 
+    user_id,
+    MIN(login_date) as start_date,
+    MAX(login_date) as end_date,
+    COUNT(*) as consecutive_days
+FROM login_with_grp
+GROUP BY user_id, grp;
+```
+
+**场景5：移动平均与平滑处理**
+```sql
+-- 3日移动平均（中心对齐）
+SELECT 
+    date,
+    value,
+    AVG(value) OVER (
+        ORDER BY date 
+        ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING
+    ) as moving_avg,
+    -- 指数移动平均近似（加权）
+    AVG(value) OVER (
+        ORDER BY date 
+        ROWS BETWEEN 2 PRECEDING AND CURRENT ROW
+    ) as weighted_avg
+FROM time_series;
+```
+
+**场景6：数据分组采样（每组取一条）**
+```sql
+-- 随机抽取每个类别的一条记录
+SELECT * FROM (
+    SELECT 
+        *,
+        ROW_NUMBER() OVER (PARTITION BY category ORDER BY RAND()) as rn
+    FROM products
+) t WHERE rn = 1;
+```
+
+#### 性能优化注意事项
+1. **索引策略**：确保 `PARTITION BY` 和 `ORDER BY` 的列有索引
+2. **内存使用**：大数据集窗口计算可能消耗大量内存，考虑分批处理
+3. **避免嵌套**：多层嵌套窗口函数会显著降低性能
+4. **简化帧定义**：默认帧定义通常性能最好，复杂 `RANGE` 定义较慢
 
 ### 2.3 条件逻辑 (CASE)
 
@@ -360,7 +500,26 @@ IFNULL(val, default)                -- MySQL
 ISNULL(val, default)                -- SQL Server
 ```
 
-### 3.2 约束与索引
+### 3.2 数据类型强制转换（Type Casting）
+
+#### 标准 SQL 语法（CAST）
+```sql
+-- 通用语法：CAST(表达式 AS 目标类型)
+SELECT 
+    CAST('123' AS INT) as num,
+    CAST(123.456 AS VARCHAR(10)) as str,
+    CAST('2024-01-01' AS DATE) as date_val,
+    CAST(price AS DECIMAL(10,2)) as formatted_price
+FROM products;
+
+-- 在运算中使用
+SELECT 
+    product_name,
+    CAST(price AS DECIMAL(10,2)) * CAST(quantity AS INT) as total
+FROM orders;
+```
+
+### 3.3 约束与索引
 
 #### 约束定义
 ```sql
@@ -377,4 +536,22 @@ DEFAULT value                                           -- 默认值
 CREATE INDEX idx_name ON table_name(column);
 CREATE UNIQUE INDEX idx_name ON table_name(column);
 DROP INDEX idx_name ON table_name;
+```
+
+#### 组合索引与覆盖索引
+```sql
+-- 组合索引（最左前缀原则）
+CREATE INDEX idx_name ON table_name(col1, col2, col3);
+
+-- 覆盖索引（查询的所有列都在索引中）
+CREATE INDEX idx_cover ON table_name(col1, col2) INCLUDE (col3, col4);  -- SQL Server
+```
+
+#### 索引优化提示
+```sql
+-- 强制使用索引（MySQL）
+SELECT * FROM table_name USE INDEX (idx_name) WHERE condition;
+
+-- 查看执行计划
+EXPLAIN SELECT * FROM table_name WHERE condition;
 ```
