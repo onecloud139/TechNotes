@@ -10,7 +10,7 @@
 
 -   **基本概念**
 
-    -   训练数据：  $\mathcal{D} = \{(\mathbf{x}_i, y_i)\}_{i=1}^N$  ，包含输入-输出对
+    -   训练数据：  $\mathcal{D} = \\{(\mathbf{x}_i, y_i)\\}_{i=1}^N$  ，包含输入-输出对
 
     -   目标：学习映射函数  $f: \mathcal{X} \rightarrow \mathcal{Y}$ 
 
@@ -34,7 +34,7 @@
 
 -   **基本概念**
 
-    -   训练数据：  $\mathcal{D} = \{\mathbf{x}_i\}_{i=1}^N$  ，仅含输入特征
+    -   训练数据：  $\mathcal{D} = \\{\mathbf{x}_i\\}_{i=1}^N$  ，仅含输入特征
 
     -   目标：发现数据中的隐藏结构和模式
 
@@ -58,9 +58,9 @@
 
     -   训练数据： $\mathcal{D} = \mathcal{D}_L \cup \mathcal{D}_U$ 
 
-    -   其中   $\mathcal{D}_L = \{(\mathbf{x}_i, y_i)\}_{i=1}^L$  为标注数据
+    -   其中   $\mathcal{D}_L = \\{(\mathbf{x}_i, y_i)\\}_{i=1}^L$  为标注数据
 
-    -   其中  $\mathcal{D}_U = \{\mathbf{x}_j\}_{j=1}^U$  为未标注数据，通常  $U \gg L$  
+    -   其中  $\mathcal{D}_U = \\{\mathbf{x}_j\\}_{j=1}^U$  为未标注数据，通常  $U \gg L$  
 
 -   **核心假设**
 
@@ -112,16 +112,16 @@ $$J(\mathbf{w}) = \frac{1}{m} \sum_{i=1}^{m} D_{KL}(P^{(i)} || \hat{P}^{(i)}) = 
 -   **L1 正则化 (Lasso Regression)**\
     惩罚权重的绝对值之和。倾向于产生稀疏权重矩阵，即产生少量特征权重不为零，其他都为零，因此可用于特征选择。
 
-    $$J(\mathbf{w}) = \text{Original Loss} + \lambda \|\mathbf{w}\|_1 = \text{Original Loss} + \lambda \sum_{j=1}^{n} |w_j|$$
+$$J(\mathbf{w}) = \text{Original Loss} + \lambda \|\mathbf{w}\|_1 = \text{Original Loss} + \lambda \sum_{j=1}^{n} |w_j|$$
 
 -   **L2 正则化 (Ridge Regression)**\
     惩罚权重的平方和。使得所有权重值均向零缩小，但通常不会等于零。
 
-    $$J(\mathbf{w}) = \text{Original Loss} + \lambda \|\mathbf{w}\|_2^2 = \text{Original Loss} + \lambda \sum_{j=1}^{n} w_j^2$$
+$$J(\mathbf{w}) = \text{Original Loss} + \lambda \|\mathbf{w}\|_2^2 = \text{Original Loss} + \lambda \sum_{j=1}^{n} w_j^2$$
 
     在逻辑回归中，添加L2正则化后的损失函数为：
 
-    $$J(\mathbf{w}) = -\frac{1}{m} \sum_{i=1}^{m} [y^{(i)} \log(h_{\mathbf{w}}(\mathbf{x}^{(i)})) + ...] + \frac{\lambda}{2m} \sum_{j=1}^{n} w_j^2$$
+$$J(\mathbf{w}) = -\frac{1}{m} \sum_{i=1}^{m} [y^{(i)} \log(h_{\mathbf{w}}(\mathbf{x}^{(i)})) + ...] + \frac{\lambda}{2m} \sum_{j=1}^{n} w_j^2$$
 
 ## One-Hot 编码 (One-Hot Encoding)
 
