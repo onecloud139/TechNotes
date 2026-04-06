@@ -10,11 +10,7 @@
 
 -   **基本概念**
 
-<<<<<<< HEAD
-    -   训练数据：  $\mathcal{D} = \{(\mathbf{x}_i, y_i)\}_{i=1}^N$  ，包含输入-输出对
-=======
-    -   训练数据：  $\mathcal{D} = \{(\mathbf{x}_i, y_i)\}_{i=1}^N$   ，包含输入-输出对
->>>>>>> afdbec3ae2a3b6eb7a2d1ba99769c49177f0a4be
+    -   训练数据：  $'\mathcal{D} = \{(\mathbf{x}_i, y_i)\}_{i=1}^N'$   ，包含输入-输出对
 
     -   目标：学习映射函数  $f: \mathcal{X} \rightarrow \mathcal{Y}$ 
 
@@ -38,7 +34,7 @@
 
 -   **基本概念**
 
-    -   训练数据：  $\mathcal{D} = \\{\mathbf{x}_i\\}_{i=1}^N$  ，仅含输入特征
+    -   训练数据：  $'\mathcal{D} = \{\mathbf{x}_i\}_{i=1}^N'$  ，仅含输入特征
 
     -   目标：发现数据中的隐藏结构和模式
 
@@ -123,7 +119,7 @@ $$J(\mathbf{w}) = \text{Original Loss} + \lambda \|\mathbf{w}\|_1 = \text{Origin
 
 $$J(\mathbf{w}) = \text{Original Loss} + \lambda \|\mathbf{w}\|_2^2 = \text{Original Loss} + \lambda \sum_{j=1}^{n} w_j^2$$
 
-    在逻辑回归中，添加L2正则化后的损失函数为：
+-   在逻辑回归中，添加L2正则化后的损失函数为：
 
 $$J(\mathbf{w}) = -\frac{1}{m} \sum_{i=1}^{m} [y^{(i)} \log(h_{\mathbf{w}}(\mathbf{x}^{(i)})) + ...] + \frac{\lambda}{2m} \sum_{j=1}^{n} w_j^2$$
 
