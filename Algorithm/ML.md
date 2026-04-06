@@ -10,7 +10,7 @@
 
 -   **基本概念**
 
-    -   训练数据：  $\mathcal{D} = \{(\mathbf{x}_i, y_i)\}_{i=1}^N$  ，包含输入-输出对
+    -   训练数据：  $\mathcal{D} = \{(\mathbf{x}_i, y_i)\}_{i=1}^N$   ，包含输入-输出对
 
     -   目标：学习映射函数  $f: \mathcal{X} \rightarrow \mathcal{Y}$ 
 
