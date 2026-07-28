@@ -192,6 +192,70 @@ $$ Attention(Q,K,V)=softmax(\frac{QK^T}{\sqrt{d_k}})V $$
 
 这个输出是一个丰富的表示矩阵，其中每个行向量都包含了整个输入序列的上下文信息。它可以被送入 Decoder（在原始 Transformer 中用于翻译），或者直接用于各种任务（如文本分类、BERT 等）。
 
+### 矩阵维度变化
+
+#### 各层维度变化
+
+##### 1. 输入嵌入层 (Input Embedding)
+
+- 输入: 词索引序列，形状为 (_B_,_S_)
+- 输出: 词向量矩阵，形状为 (_B_,_S_,_D_)
+
+##### 2. 位置编码 (Positional Encoding)
+
+- 输入: (_B_,_S_,_D_)
+- 位置编码矩阵: (_S_,_D_)(扩散到每个 batch)
+- 输出: (_B_,_S_,_D_)(输入嵌入 + 位置编码)
+
+##### 3. 第 l 层 Encoder 内部
+
+###### 子层 1: 多头自注意力
+
+1. Q/K/V 线性投影:
+
+   - 输入: (_B_,_S_,_D_)
+   - 权重: $W_Q,W_K,W_V$每个形状为 ($D,d_k$)(或合并为 ($D,3d_k$))
+   - 输出: _Q_,_K_,_V_每个形状为 (_B_,_S_,$d_k$)
+2. 多头分割与转置:
+
+   - 输入: _Q_,_K_,_V_每个 (_B_,_S_,$d_k$)
+   - 重塑: (_B_,_S_,_H_,$d_k$)→ 转置为 (_B_,_H_,_S_,$d_k$)
+3. 注意力计算:
+
+   $$
+   K^T
+   $$
+
+   - : (_B_,_H_,_S_,$d_k$)×(_B_,_H_,$d_k$,_S_)→(_B_,_H_,_S_,_S_)
+   - Softmax 后乘 V: (_B_,_H_,_S_,_S_)×(_B_,_H_,_S_,$d_v$)→(_B_,_H_,_S_,$d_v$)
+4. 多头合并与输出投影:
+
+   - 转置并合并: (_B_,_H_,_S_,$d_v$)→(_B_,_S_,_H_×$d_v$)=(_B_,_S_,_D_)
+   - 输出投影: 保持 (_B_,_S_,_D_)
+5. 残差连接与层归一化:
+
+   - 输出: (_B_,_S_,_D_)
+
+###### 子层 2: 前馈神经网络
+
+1. 第一层线性变换:
+
+   - 输入: (_B_,_S_,_D_)
+   - 权重: $W_1$形状为 (_D_,$d_{ff}$)
+   - 输出: (B,S,$d_{ff}$)
+2. 激活函数:
+
+   - 输出:  (B,S,$d_{ff}$)
+3. 第二层线性变换:
+
+   - 权重: $W_2$形状为 ($d_{ff}$,_D_)
+   - 输出: (_B_,_S_,_D_)
+4. 残差连接与层归一化:
+
+   - 输出: (_B_,_S_,_D_)(作为下一层输入或最终编码器输出)
+
+编码器最终输出: (_B_,_S_,_D_)
+
 ## Decoder
 
 Decoder 的核心任务是：​**以自回归的方式生成输出序列**。所谓"自回归"，是指在生成每个词时，只能看到已经生成的词（以及完整的输入序列信息），然后预测下一个词。
@@ -287,6 +351,502 @@ $$
 $$
 P(y_t∣y_{<t},X)=softmax(H_{dec}^NW_{vocab}+b_{vocab})
 $$
+
+### 矩阵维度变化
+
+#### 各层维度变化
+
+##### 1. 输入处理
+
+- 目标输入: 右移的目标序列，形状为 (_B_,_T_)
+- 输出嵌入: (_B_,_T_,_D_)
+- 位置编码: (_B_,_T_,_D_)
+
+##### 2. 第 l 层 Decoder 内部
+
+###### 子层 1: 掩码多头自注意力
+
+1. Q/K/V 投影 (同 Encoder):
+
+   - 输入: (_B_,_T_,_D_)
+   - 输出: _Q_,_K_,_V_每个 (_B_,_T_,$d_k$)
+2. 掩码注意力计算:
+
+   - 注意力分数: (_B_,_H_,_T_,_T_)(下三角掩码)
+   - 其余计算同 Encoder
+   - 输出: (_B_,_T_,_D_)
+
+###### 子层 2: 编码器-解码器注意力 (交叉注意力)
+
+这是最关键的维度交互：
+
+1. Query 来自解码器:
+
+   - 输入: 子层 1 输出 (_B_,_T_,_D_)
+   - → (_B_,_T_,_dk_)
+2. Key, Value 来自编码器:
+
+   - 输入: 编码器最终输出 (_B_,_S_,_D_)
+   - → (_B_,_S_,_dk_)
+   - → (_B_,_S_,_dv_)
+3. 注意力计算:
+
+   $$
+   K^T
+   $$
+
+   - : (_B_,_H_,_T_,$d_k$)×(_B_,_H_,$d_k$,_S_)→(_B_,_H_,_T_,_S_)
+   - 这里维度变化很重要: 查询长度是 _T_，键长度是 _S_
+   - 输出: (_B_,_T_,_D_)
+
+###### 子层 3: 前馈神经网络
+
+- 同 Encoder 的前馈网络
+- 输入: (_B_,_T_,_D_)
+- 输出: (_B_,_T_,_D_)
+
+##### 3. 输出层
+
+- 线性投影: (_B_,_T_,_D_)×(_D_,_V_)→(_B_,_T_,_V_)(V 是词汇表大小)
+- Softmax: 概率分布 (_B_,_T_,_V_)
+
+## 注意力机制优化
+
+Transformer 的标准自注意力机制虽然强大，但其计算复杂度随序列长度呈平方级增长（O(n²)），限制了处理长序列的能力。线性注意力和稀疏注意力是两种主要的高效注意力变体，旨在降低计算成本的同时保持模型性能。
+
+### 线性注意力（Linear Attention）
+
+线性注意力通过**数学重构**将计算复杂度从 O(n²) 降低到 O(n)。其关键思想是利用**矩阵乘法的结合律**改变计算顺序，避免显式计算 n×n 的注意力矩阵。
+
+**线性注意力公式**​（核函数近似）：
+
+$$
+LinearAttention(Q,K,V)=ϕ(Q)(ϕ(K)^TV)
+$$
+
+其中 ϕ 是一个特征映射函数（如 ϕ(x)=elu(x)+1），将计算重排为先计算 ϕ(K)V（复杂度 O(n)），再与 ϕ(Q)相乘。
+
+**低秩投影变体**​（如 Linformer）：
+
+$$
+Attention(Q,K,V)=softmax(\frac{1}{d_k}Q(EK)^T)(FV)
+$$
+
+这里 E 和 F 是投影矩阵，将 Key 和 Value 的序列长度从 n 压缩到 k（k ≪ n），复杂度降至 O(nk)。
+
+- **应用场景**​：处理长文本序列（如文档翻译），其中序列长度 n=1000 时，标准注意力需计算 100 万次点积，而线性注意力仅需线性次计算。
+- **效果**​：在保持 90% 以上性能的同时，计算量减少约 75%（如 DeepSeek 模型仅用 1/4 算力达到相近效果）。
+
+### Kimi Delta Attention（KDA）
+
+[Kimi Delta Attention（KDA）](https://arxiv.org/abs/2510.26692) 是 Kimi Linear 提出的线性注意力变体，也是 Kimi K3 的核心序列混合算子之一。它在 Gated DeltaNet 的 delta rule 上，把按头共享的遗忘门细化为**按通道独立的衰减率**，以更精确地管理有限大小的循环记忆状态。
+
+设每个头维护状态 $S_t \in \mathbb{R}^{d_k \times d_v}$，$\alpha_t$ 是通道级遗忘门，$\beta_t$ 是写入步长，则其递推可写为：
+
+$$
+S_t = (I - \beta_t k_t k_t^\top)\operatorname{Diag}(\alpha_t)S_{t-1} + \beta_t k_t v_t^\top,
+\qquad o_t = S_t^\top q_t
+$$
+
+- **线性解码状态**：KDA 保存固定大小的 $S_t$，而不是随上下文线性增长的 KV cache；因此自回归解码的状态内存不随序列长度增长。
+- **细粒度遗忘**：$\alpha_t$ 逐通道控制旧记忆保留多少，$\beta_t$ 控制新键值关联写入多少；这比每头一个标量遗忘门更灵活。
+- **高效并行**：训练/prefill 时可用分块并行算法，生成时使用递推状态更新；Moonshot 还开源了 [FlashKDA](https://github.com/MoonshotAI/FlashKDA) 内核。
+- **与 MLA 的区别**：MLA 仍是全局 softmax 注意力，只是压缩 KV cache；KDA 则以有限状态的线性递推取代大部分全局注意力。因此二者可互补，而非互相替代。
+- **Kimi K3 的用法**：[Kimi K3](https://github.com/MoonshotAI/Kimi-K3) 的 93 层中包含 69 层 KDA 和 24 层 Gated MLA。这样的混合结构让 KDA 负责大部分高效长程状态传递，而 MLA 周期性提供全局信息交互。
+
+### 稀疏注意力（Sparse Attention）
+
+稀疏注意力通过**限制每个 token 的注意力范围**，只计算最关键的连接，避免全序列交互。常见方法包括滑动窗口、全局 token 和随机采样.稀疏注意力没有统一公式，而是通过**掩码矩阵** M 实现：
+
+$$
+SparseAttention(Q,K,V)=softmax(\frac{1}{d_k}QK^T+M)V
+$$
+
+掩码 M 定义哪些位置允许交互：
+
+- Mij=0 允许计算注意力。
+- Mij=−∞ 禁止计算（被忽略）。
+
+### 主要稀疏模式
+
+1. **滑动窗口注意力**​（如 Longformer）：
+
+   - 每个 token 只关注前后 w 个邻近 token（窗口大小 w）。
+   - **例子**​：序列长度 n=1000, w=512，计算量从 100 万次降至 51.2 万次。
+2. **全局注意力**​（如 BigBird）：
+
+   - 指定部分 token（如 [CLS]）具有全局视野，可关注所有位置。
+   - **例子**​：在分类任务中，[CLS] token 全局关注全文，其他 token 局部关注。
+3. **随机注意力**​：
+
+   - 每个 token 随机关注少量其他 token（如 k=10），引入长程依赖的随机性。
+   - **例子**​：BigBird 结合滑动窗口、全局 token 和随机注意力，近似完整注意力能力。
+
+### 计算效率
+
+- **复杂度**​：从 O(n²) 降至 O(n) 或 O(n log n)。
+- **实际效果**​：在 Longformer 中，处理 4000 token 的序列时，内存占用降低 40%，推理速度提升 2-3 倍。
+
+### 结构化注意力（Structured Attention）
+
+- 核心思想​：为注意力权重施加某种结构先验，而不是完全自由学习。例如，让注意力权重分布符合一个潜在的树结构或语法结构。
+- 为什么有效​：将人类对语言结构的先验知识（如句法）注入模型，可能让模型更高效地学习。
+- 典型代表​：相关工作更多出现在学术论文中，旨在让模型自动学习序列背后的隐结构。
+
+### 多模态与跨领域注意力
+
+- 核心思想​：将注意力机制应用于非文本数据或不同模态数据之间。
+- 典型代表​：
+
+  - Vision Transformer (ViT)​：将图像切分成 Patch，每个 Patch 视为一个 Token，然后直接应用 Transformer 的自注意力机制，颠覆了 CNN 在 CV 领域的统治地位。
+  - Cross-Attention​：已经在 Encoder-Decoder 架构中见过它。它同样广泛应用于多模态任务（如图像描述生成、视觉问答），让一种模态（如文本）的 Query 去关注另一种模态（如图像）的 Key 和 Value。
+
+
+### Flash Attention
+
+FlashAttention 是注意力层的 **IO-aware kernel/算法优化**，不是一种新的注意力架构。它仍然计算标准的精确 softmax attention，核心目标是减少 GPU HBM 与片上 SRAM 之间的读写，并提高 GPU 利用率。
+
+#### 核心机制
+
+1. **分块计算（Tiling）**：将 $Q,K,V$ 按序列和头维度分块，只把当前需要的 tile 放入片上 SRAM。
+2. **在线 Softmax（Online Softmax）**：分块维护每行的 running max 和归一化因子，不物化完整的 $QK^\top$ 注意力矩阵。
+3. **反向传播重计算（Recomputation）**：前向只保存必要统计量，反向时重新计算注意力块，以时间换显存。
+4. **内核融合与硬件流水线**：融合矩阵乘法、Softmax 和输出累积，并针对不同 GPU 架构使用并行切分、异步拷贝、warp specialization 等优化。
+
+分块降低的是 **HBM IO 和中间注意力矩阵的存储开销**，并没有把标准全注意力的计算复杂度从 $O(N^2)$ 变成线性；注意力的核心矩阵乘法仍然是 $O(N^2)$ 计算。
+
+#### 版本演进
+
+| 版本 | 主要特点 | 典型硬件/状态 |
+| --- | --- | --- |
+| FlashAttention-1 | IO 感知分块、在线 Softmax、反向重计算 | Ampere 等 GPU；2022 年论文 |
+| FlashAttention-2 | 更好的并行化和工作分区，提升长序列吞吐 | Ampere、Ada、Hopper；支持更大 head dimension |
+| FlashAttention-3 | 面向 Hopper 的异步流水线和硬件利用率优化；官方实现包含 FP16/BF16 前向与反向、FP8 前向 | H100/H800；beta/实验性组件 |
+| FlashAttention-4 | 基于 CuTeDSL 的新实现，面向 Hopper 与 Blackwell | H100、B200 等；具体支持随版本和 CUDA 环境变化 |
+
+FlashAttention-3/4 的支持范围、安装方式和性能会随 CUDA、GPU 架构、数据类型及 kernel 后端变化，不能只按版本号判断实际速度。
+
+#### 需要避免的表述
+
+1. **不是近似注意力**：FlashAttention 不使用低秩近似或稀疏近似，但不同 kernel 的浮点舍入结果可能存在微小差异。
+2. **不是无限长上下文方案**：它主要节省 IO 和显存，实际上下文长度仍受模型、KV cache、硬件和服务端调度限制。
+3. **不等于 KV cache 管理**：FlashAttention 优化单次注意力计算；KV cache 分页、复用、调度属于推理运行时的职责。
+
+### LLM 推理部署优化：vLLM 与 SGLang
+
+FlashAttention 解决的是“一个注意力算子如何算得更快”，而 vLLM、SGLang 解决的是“很多请求如何共同运行得更高效”。两者通常会调用 FlashAttention、FlashInfer、Triton 或其他硬件后端，因此不是互相替代关系。
+
+#### vLLM：通用高吞吐推理运行时
+
+vLLM 的核心优化包括：
+
+- **PagedAttention**：将 KV cache 切分成固定大小的 block，减少连续显存分配和碎片，并支持更灵活的批处理。
+- **Continuous Batching**：请求动态进入和退出 batch，提高 GPU 在 prefill/decode 混合负载下的利用率。
+- **Chunked Prefill**：将很长的输入分块预填充，减少长请求对正在 decode 请求的阻塞。
+- **Automatic Prefix Caching**：复用共享前缀的 KV cache，适合多轮对话、RAG 和 agent 工作流。
+- **Speculative Decoding**：使用草稿模型、n-gram 或其他提议器一次提出多个 token，再由目标模型验证。
+- **量化与并行部署**：支持多种权重量化、KV cache 量化，以及 tensor/pipeline/data/expert/context parallelism；还支持 prefill/decode 分离等分布式部署方式。
+- **后端选择**：可根据硬件和模型选择 FlashAttention、FlashInfer、Triton 等 attention/GEMM kernel。
+
+#### SGLang：前缀复用与结构化生成友好的运行时
+
+SGLang 的代表性优化包括：
+
+- **RadixAttention**：用 radix tree 管理并复用共享前缀的 KV cache，适合多轮对话、few-shot、RAG 和 agent 场景。
+- **低开销调度与 Continuous Batching**：减少 CPU 调度开销，并对动态请求进行批处理。
+- **Chunked Prefill 与 Prefill-Decode Disaggregation**：将 prefill 和 decode 拆分到不同实例或资源池，降低长输入对 decode 延迟的影响。
+- **Speculative Decoding、Paged Attention 和多维并行**：支持投机解码，以及 tensor/pipeline/data/expert parallelism。
+- **HiCache**：在 GPU 显存、主机内存和外部存储之间构建分层 KV cache，扩展长上下文和跨请求缓存能力。
+- **量化、多 LoRA 与 kernel 后端**：支持多种量化和多 LoRA batching，并可使用 FlashInfer、FlashAttention、Triton 等后端；具体能力取决于版本、硬件和模型架构。
+
+#### 三者关系
+
+```text
+FlashAttention / FlashInfer / Triton
+        ↓  注意力与矩阵计算 kernel
+vLLM / SGLang
+        ↓  KV cache、调度、批处理、并行、量化、服务 API
+线上推理服务
+```
+
+简单区分：单算子性能看 kernel；高并发吞吐看 batching 与 KV cache 管理；长上下文和多轮复用重点看 prefix cache/HiCache；大规模集群还要考虑并行策略和 prefill-decode 分离。
+
+## 注意力变体
+
+这一节按“信息如何连接”和“KV 缓存如何存储”两条线分类。线性注意力、稀疏注意力和 FlashAttention 分别见上一节和后文；它们主要改变复杂度或实现，而不等同于下面的头部/KV 架构变体。
+
+### 因果自注意力与交叉注意力
+
+- **双向自注意力（bidirectional self-attention）**：每个 token 都能关注整个输入序列，常用于 Encoder，例如 BERT。
+- **因果自注意力（causal / masked self-attention）**：通过上三角掩码禁止关注未来 token，是 Decoder-Only 语言模型生成时的基本形式。
+- **交叉注意力（cross-attention）**：$Q$ 来自当前序列，$K,V$ 来自另一序列或模态；常用于 Encoder-Decoder 翻译和图文多模态融合。
+
+### MHA（多头注意力，Multi-Head Attention）
+
+MHA 为每个头分别学习 $Q,K,V$ 投影，在多个表示子空间并行建模依赖关系，再拼接输出。
+
+$$
+\text{MultiHead}(Q,K,V) = \text{Concat}(\text{head}_1,\ldots,\text{head}_h)W^O
+$$
+
+$$
+\text{head}_i = \text{Attention}(QW_i^Q,KW_i^K,VW_i^V)
+$$
+
+### MQA（多查询注意力，Multi-Query Attention）
+
+MQA 保留多个独立的查询头，但让所有头共享一组 Key 和 Value 投影：
+
+$$
+\text{head}_i = \text{Attention}(QW_i^Q,KW^K,VW^V), \quad i=1,\ldots,h
+$$
+
+- **收益**：KV cache 从 $h$ 组降至 1 组，显著降低增量解码的内存带宽需求。
+- **权衡**：共享 KV 形成更强的信息瓶颈，质量或训练稳定性可能略逊于 MHA。
+
+### GQA（分组查询注意力，Grouped-Query Attention）
+
+GQA 是 MHA 与 MQA 之间的折中。设查询头数为 $h_q$、KV 头数为 $h_{kv}$，其中 $1 < h_{kv} < h_q$；每个 KV 头服务 $h_q / h_{kv}$ 个查询头。
+
+$$
+\text{head}_{g,i} = \text{Attention}(QW_{g,i}^Q,KW_g^K,VW_g^V)
+$$
+
+- **收益**：KV cache 大小约为 MHA 的 $h_{kv}/h_q$，质量通常接近 MHA。
+- **应用**：已成为现代 Decoder-Only 模型常见的推理效率设计。
+
+### MLA（多头潜在注意力，Multi-Head Latent Attention）
+
+MLA 由 DeepSeek-V2 提出。它不直接缓存每个头的 $K,V$，而是先把 KV 信息压缩到低维潜变量 $c_t^{KV}$；推理时缓存该潜变量并按需要恢复注意力所需表示。
+
+$$
+c_t^{KV} = x_t W^{DKV}, \qquad [K_t;V_t] \approx c_t^{KV} W^{UKV}
+$$
+
+- **收益**：在保留多头表达能力的同时大幅压缩 KV cache，尤其适合长上下文和高并发解码。
+- **实现要点**：MLA 与 RoPE 的位置分量需分开处理，工程实现通常会通过矩阵吸收（matrix absorption）减少显式恢复开销。
+- **权衡**：训练和推理内核更复杂；它优化的是缓存与带宽，不会消除标准注意力随序列长度增长的二次计算。
+
+## 激活函数
+
+激活函数与 FFN 结构需要区分：ReLU、GELU、SiLU/Swish 是点激活函数；GLU、SwiGLU、GeGLU 则是带门控的双分支 FFN 结构。当前大模型中，GLU 变体仍很常见，但不能简单概括为所有模型都默认使用同一个激活函数。
+
+### ReLU：经典基线
+
+$$
+\mathrm{ReLU}(x)=\max(0,x)
+$$
+
+ReLU 计算简单，但存在“Dead ReLU”、输出非零中心以及负半轴梯度为零等问题，因此在现代大语言模型的 FFN 中通常不是首选；在 CNN 等场景中仍然有价值。
+
+### GLU：门控结构
+
+**GLU (Gated Linear Unit)** 不是单一激活函数，而是一种通过逐元素乘法控制信息流的结构：
+
+$$
+\mathrm{GLU}(x)=(xW+b)\otimes\sigma(xV+c)
+$$
+
+其中 $\sigma(xV+c)$ 是 sigmoid 门控分支，输出位于 $[0,1]$；$(xW+b)$ 是信息分支。
+
+### SwiGLU 与 GeGLU：主流变体
+
+$$
+\mathrm{SwiGLU}(x)=\mathrm{Swish}(xW+b)\otimes(xV+c)
+$$
+
+$$
+\mathrm{GeGLU}(x)=\mathrm{GELU}(xW+b)\otimes(xV+c)
+$$
+
+- **SwiGLU**：使用平滑、非单调的 Swish/SiLU 分支。
+- **GeGLU**：使用 GELU 分支。
+- 两者都保留了 GLU 的“双分支逐元素相乘”结构。
+
+**近期判断：**SwiGLU/GeGLU 仍是大型 Transformer FFN 的常见方案，但激活函数并没有形成永久不变的“王者”。实际选型还会受到模型家族、MoE/稠密结构、参数预算、量化方案和硬件内核支持的影响。
+
+## Tokenizer 范式
+
+所有分词器的设计都在权衡两个核心矛盾：
+
+1. **词汇表大小**​：词汇表越大，能覆盖的独立词越多。
+2. **未登录词（OOV）问题**​：词汇表再大，也总会遇到没见过的词。如何表示这些新词？
+
+基于这个权衡，演化出了几种不同的方案。
+
+### 基于词的分词 (Word-based Tokenization)
+
+**原理**​：最简单直接的方法。使用一个巨大的、预先定义好的词汇表，将文本按空格或标点分割成词，然后每个词映射到一个 ID。
+
+- **示例**​：
+
+  - 输入：`"I don't like pineapples."`
+  - 输出：`["I", "don't", "like", "pineapples", "."]`
+- **优点**​：直观，每个 Token 携带的语义信息丰富。
+- **缺点**​：
+
+  1. **词汇表巨大**​：需要覆盖所有词的变形（如 run, runs, running, ran）、复合词、专有名词等，导致词汇表轻松膨胀到几十万甚至上百万。
+  2. **未登录词（OOV）问题严重**​：遇到词汇表外的词（如 `"pineapples"` 如果不在词表中），只能用 `[UNK]`（Unknown）代替，导致信息丢失。
+- **现状**​：​**几乎不再用于现代 LLM**，因为 OOV 问题太致命。
+
+### 基于字符的分词 (Character-based Tokenization)
+
+**原理**​：将文本分解到最细粒度——单个字符（字母、标点、符号等）。
+
+- **示例**​：
+
+  - 输入：`"I don't like pineapples."`
+  - 输出：`["I", " ", "d", "o", "n", "'", "t", " ", "l", "i", "k", "e", " ", "p", "i", "n", "e", "a", "p", "p", "l", "e", "s", "."]`
+  - （实际中通常会忽略空格）
+- **优点**​：
+
+  1. **词汇表极小**​：英文只需 256 个左右（ASCII），中文几千个常用字。几乎不存在 OOV 问题。
+  2. **非常鲁棒**​：能处理任何拼写错误、新词或特殊符号。
+- **缺点**​：
+
+  1. **序列长度爆炸**​：一个句子会被分成成百上千个 Token，导致计算和内存开销巨大。
+  2. **语义学习困难**​：单个字符（如 `"p"`）几乎不携带任何语义信息，模型需要从零碎的字符中组合出含义，训练难度大。
+- **现状**​：​**很少单独使用**，因为序列过长的问题比 OOV 问题更严重。
+
+### 基于子词的分词 (Subword Tokenization) - **当前主流**
+
+**原理**​：取上述两种方法的优点。将词拆分成更小的、有意义的“子词”单元。常见词作为一个整体保留，生僻词则拆分成更小的部分（如前缀、后缀、词根）。这是现代 Transformer 模型（如 BERT、GPT、LLaMA）的标准选择。
+
+### A. Byte Pair Encoding (BPE) - GPT、LLaMA、Qwen 早期版本使用
+
+**原理**​：一种数据压缩算法，从字符开始，​**迭代地**将最常出现的相邻符号对合并成新的符号。
+
+**工作流程**​：
+
+1. **预处理**​：将文本分成词（按空格），统计词频。
+2. **初始化**​：将所有基础字符（如英文的 a-z）加入词汇表。
+3. **迭代合并**​：
+
+   - 统计所有**相邻符号对**的频率。
+   - 将**频率最高**的符号对（如 `"e"` 和 `"s"`-> `"es"`）合并成一个新符号。
+   - 将这个新符号加入词汇表。
+   - 重复此过程，直到达到预定的合并次数（即词汇表大小）。
+4. **编码**​：对新句子，先按基础字符拆分，然后尽可能应用已学到的合并规则。
+
+- **示例**​：
+  - 假设 `"low"`(5), `"lower"`(2), `"newest"`(6), `"widest"`( (3) 是语料。
+  - 初始词汇：`l, o, w, e, r, n, w, s, t, ...`
+  - 最高频对：`e` 和 `s` 出现了 6+3=9 次 -> 合并为 `es`。
+  - 下一步，`es` 和 `t` 经常相邻 -> 合并为 `est`。
+  - 最终，`"widest"` 可能被分词为 `["wid", "est"]`。
+
+### B. WordPiece - BERT、DistilBERT 使用
+
+**原理**​：与 BPE 类似，但合并策略不同。BPE 基于频率，而 WordPiece 基于**可能性**，选择合并后能最大程度增加语言模型似然值的对。
+
+**工作流程**​：
+
+1. 初始化与 BPE 相同。
+2. **评分**​：不是计算频率，而是为每个可能的符号对计算一个分数：`score = (freq_of_pair) / (freq_of_first * freq_of_second)`。
+3. **合并**​：选择**分数最高**的符号对进行合并。
+4. 重复直到词汇表大小达标。
+
+- **特点**​：更“贪婪”，倾向于更快地形成常用词。BERT 的 `##` 前缀表示该子词是一个词的一部分（如 `"est"` 在词中会表示为 `"##est"`）。
+
+### C. Unigram Language Model - SentencePiece (ALBERT、T5、LLaMA 后期使用)
+
+**原理**​：与 BPE/WordPiece（从下至上合并）相反，它是一种**从上至下**的方法。
+
+**工作流程**​：
+
+1. **初始化**​：用一个巨大的种子词汇表（如所有常见词和子词）开始。
+2. **迭代剪枝**​：
+
+   - 在当前词汇表下，用语言模型计算整个语料的似然值。
+   - 计算每个子词对总似然值的“损失”（如果移除该子词，似然值会下降多少）。
+   - 移除那些对似然值影响最小的子词（即最不重要的子词）。
+   - 重复此过程，直到词汇表缩小到目标大小。
+3. **编码**​：对于一个词，找出所有可能的分词方式，选择概率最高的那种。
+
+- **优点**​：
+  - 非常灵活，可以输出多种可能的分词结果（带概率）。
+  - 是 **SentencePiece** 工具的核心算法之一。SentencePiece 的另一个关键特点是**将文本视为原始字节流**，无需预处理（如空格、标点），使其成为真正的语言无关分词器，完美支持中文、日文等没有空格的语言。
+
+### D. Byte-level BPE - GPT-2/4、Qwen2 使用
+
+**原理**​：BPE 的一个变种，但**在字节级别**进行操作，而不是 Unicode 字符级别。
+
+- **优点**​：
+
+  1. **终极词汇表**​：基础词汇表只有 256 个（所有字节），从根本上解决了 OOV 问题。
+  2. **语言无关**​：可以表示任何文本、任何语言的任何字符，甚至是 Emoji 和特殊文件格式。
+- **缺点**​：可能会导致更长的序列（因为需要多个字节来表示一个复杂字符）。
+- **现状**​：这是当前最先进、最鲁棒的分词方案，被最新的主流模型广泛采用。
+
+## 优化器（Optimizer）
+
+优化器根据损失函数的梯度更新参数：
+
+$$
+\theta_{t+1} = \theta_t - \eta \cdot \nabla L(\theta_t)
+$$
+
+这里的关键差异在于：是否累积历史梯度、是否按参数自适应缩放，以及是否利用矩阵参数的几何结构。
+
+### SGD、Momentum 与 NAG
+
+- **SGD**：直接沿当前梯度方向更新，简单但在狭长损失谷中容易震荡。
+- **Momentum**：累积梯度的一阶动量，在方向一致时加速、在来回震荡时平滑更新。
+
+$$
+v_t = \gamma v_{t-1} + \nabla L(\theta_t), \qquad \theta_{t+1} = \theta_t - \eta v_t
+$$
+
+- **NAG（Nesterov Accelerated Gradient）**：先按历史动量“预走一步”，再在预估位置计算梯度；通常比普通 Momentum 更早修正方向。
+
+### 自适应学习率：Adagrad、RMSprop、Adam 与 AdamW
+
+- **Adagrad**：按参数累计梯度平方，为稀疏特征提供较大的相对学习率；但累计量单调增加，学习率可能过快衰减。
+
+$$
+G_t = G_{t-1} + g_t^2, \qquad \theta_{t+1} = \theta_t - \frac{\eta}{\sqrt{G_t} + \epsilon} g_t
+$$
+
+- **RMSprop**：用梯度平方的指数滑动平均取代累计和，避免 Adagrad 的持续衰减。
+
+$$
+v_t = \rho v_{t-1} + (1-\rho)g_t^2, \qquad \theta_{t+1} = \theta_t - \frac{\eta}{\sqrt{v_t} + \epsilon}g_t
+$$
+
+- **Adam**：结合一阶动量和二阶矩的自适应缩放。
+
+$$
+m_t = \beta_1m_{t-1} + (1-\beta_1)g_t, \qquad v_t = \beta_2v_{t-1} + (1-\beta_2)g_t^2
+$$
+
+$$
+\theta_{t+1} = \theta_t - \eta \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon}
+$$
+
+- **AdamW**：将权重衰减与 Adam 的自适应更新解耦，是训练 Transformer 的常用基线。
+
+$$
+\theta_{t+1} = (1-\eta\lambda)\theta_t - \eta \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon}
+$$
+
+### Muon：对矩阵更新做正交化
+
+[Muon](https://github.com/KellerJordan/Muon)（2024）是面向神经网络**隐藏层二维权重矩阵**的优化器。它先计算带动量的更新，再近似取其极分解（polar decomposition）中的正交因子，使更新的奇异值更均衡，而不是像 AdamW 那样逐元素缩放。
+
+对于矩阵参数 $W$，可以把其核心过程概括为：
+
+$$
+B_t = \mu B_{t-1} + (1-\mu)\nabla_W L, \qquad \Delta W_t = \operatorname{Orthogonalize}(B_t)
+$$
+
+$$
+W_{t+1} = W_t - \eta \Delta W_t
+$$
+
+- **如何高效实现**：不必执行昂贵的 SVD；实践中通常用固定步数的 Newton--Schulz 迭代近似正交化。
+- **适用参数**：通常用于线性层和卷积层等二维（或可展平为二维）的隐藏权重。
+- **不要一刀切替换 AdamW**：Embedding、输出头、偏置、LayerNorm/RMSNorm 的缩放参数等往往继续使用 AdamW；Muon 的参考实现也采用这种混合参数组。
+- **优势与限制**：它在部分 Transformer 训练实验中展现出很好的数据效率和大批量训练表现，但学习率、权重衰减、分布式正交化开销都需要重新验证；把它视为有前景的训练优化方案，而不是 AdamW 的无条件替代品。
 
 ## Bert 家族
 
@@ -944,119 +1504,6 @@ class MultiHeadAttention(nn.Module):
         return output, attn_weights
 ```
 
-### tokenizer 范式
-
-所有分词器的设计都在权衡两个核心矛盾：
-
-1. **词汇表大小**​：词汇表越大，能覆盖的独立词越多。
-2. **未登录词（OOV）问题**​：词汇表再大，也总会遇到没见过的词。如何表示这些新词？
-
-基于这个权衡，演化出了几种不同的方案。
-
-#### 基于词的分词 (Word-based Tokenization)
-
-**原理**​：最简单直接的方法。使用一个巨大的、预先定义好的词汇表，将文本按空格或标点分割成词，然后每个词映射到一个 ID。
-
-- **示例**​：
-
-  - 输入：`"I don't like pineapples."`
-  - 输出：`["I", "don't", "like", "pineapples", "."]`
-- **优点**​：直观，每个 Token 携带的语义信息丰富。
-- **缺点**​：
-
-  1. **词汇表巨大**​：需要覆盖所有词的变形（如 run, runs, running, ran）、复合词、专有名词等，导致词汇表轻松膨胀到几十万甚至上百万。
-  2. **未登录词（OOV）问题严重**​：遇到词汇表外的词（如 `"pineapples"` 如果不在词表中），只能用 `[UNK]`（Unknown）代替，导致信息丢失。
-- **现状**​：​**几乎不再用于现代 LLM**，因为 OOV 问题太致命。
-
-#### 基于字符的分词 (Character-based Tokenization)
-
-**原理**​：将文本分解到最细粒度——单个字符（字母、标点、符号等）。
-
-- **示例**​：
-
-  - 输入：`"I don't like pineapples."`
-  - 输出：`["I", " ", "d", "o", "n", "'", "t", " ", "l", "i", "k", "e", " ", "p", "i", "n", "e", "a", "p", "p", "l", "e", "s", "."]`
-  - （实际中通常会忽略空格）
-- **优点**​：
-
-  1. **词汇表极小**​：英文只需 256 个左右（ASCII），中文几千个常用字。几乎不存在 OOV 问题。
-  2. **非常鲁棒**​：能处理任何拼写错误、新词或特殊符号。
-- **缺点**​：
-
-  1. **序列长度爆炸**​：一个句子会被分成成百上千个 Token，导致计算和内存开销巨大。
-  2. **语义学习困难**​：单个字符（如 `"p"`）几乎不携带任何语义信息，模型需要从零碎的字符中组合出含义，训练难度大。
-- **现状**​：​**很少单独使用**，因为序列过长的问题比 OOV 问题更严重。
-
-#### 基于子词的分词 (Subword Tokenization) - **当前主流**
-
-**原理**​：取上述两种方法的优点。将词拆分成更小的、有意义的“子词”单元。常见词作为一个整体保留，生僻词则拆分成更小的部分（如前缀、后缀、词根）。这是现代 Transformer 模型（如 BERT、GPT、LLaMA）的标准选择。
-
-##### A. Byte Pair Encoding (BPE) - GPT、LLaMA、Qwen 早期版本使用
-
-**原理**​：一种数据压缩算法，从字符开始，​**迭代地**将最常出现的相邻符号对合并成新的符号。
-
-**工作流程**​：
-
-1. **预处理**​：将文本分成词（按空格），统计词频。
-2. **初始化**​：将所有基础字符（如英文的 a-z）加入词汇表。
-3. **迭代合并**​：
-
-   - 统计所有**相邻符号对**的频率。
-   - 将**频率最高**的符号对（如 `"e"` 和 `"s"`-> `"es"`）合并成一个新符号。
-   - 将这个新符号加入词汇表。
-   - 重复此过程，直到达到预定的合并次数（即词汇表大小）。
-4. **编码**​：对新句子，先按基础字符拆分，然后尽可能应用已学到的合并规则。
-
-- **示例**​：
-  - 假设 `"low"`(5), `"lower"`(2), `"newest"`(6), `"widest"`( (3) 是语料。
-  - 初始词汇：`l, o, w, e, r, n, w, s, t, ...`
-  - 最高频对：`e` 和 `s` 出现了 6+3=9 次 -> 合并为 `es`。
-  - 下一步，`es` 和 `t` 经常相邻 -> 合并为 `est`。
-  - 最终，`"widest"` 可能被分词为 `["wid", "est"]`。
-
-##### B. WordPiece - BERT、DistilBERT 使用
-
-**原理**​：与 BPE 类似，但合并策略不同。BPE 基于频率，而 WordPiece 基于**可能性**，选择合并后能最大程度增加语言模型似然值的对。
-
-**工作流程**​：
-
-1. 初始化与 BPE 相同。
-2. **评分**​：不是计算频率，而是为每个可能的符号对计算一个分数：`score = (freq_of_pair) / (freq_of_first * freq_of_second)`。
-3. **合并**​：选择**分数最高**的符号对进行合并。
-4. 重复直到词汇表大小达标。
-
-- **特点**​：更“贪婪”，倾向于更快地形成常用词。BERT 的 `##` 前缀表示该子词是一个词的一部分（如 `"est"` 在词中会表示为 `"##est"`）。
-
-##### C. Unigram Language Model - SentencePiece (ALBERT、T5、LLaMA 后期使用)
-
-**原理**​：与 BPE/WordPiece（从下至上合并）相反，它是一种**从上至下**的方法。
-
-**工作流程**​：
-
-1. **初始化**​：用一个巨大的种子词汇表（如所有常见词和子词）开始。
-2. **迭代剪枝**​：
-
-   - 在当前词汇表下，用语言模型计算整个语料的似然值。
-   - 计算每个子词对总似然值的“损失”（如果移除该子词，似然值会下降多少）。
-   - 移除那些对似然值影响最小的子词（即最不重要的子词）。
-   - 重复此过程，直到词汇表缩小到目标大小。
-3. **编码**​：对于一个词，找出所有可能的分词方式，选择概率最高的那种。
-
-- **优点**​：
-  - 非常灵活，可以输出多种可能的分词结果（带概率）。
-  - 是 **SentencePiece** 工具的核心算法之一。SentencePiece 的另一个关键特点是**将文本视为原始字节流**，无需预处理（如空格、标点），使其成为真正的语言无关分词器，完美支持中文、日文等没有空格的语言。
-
-##### D. Byte-level BPE - GPT-2/4、Qwen2 使用
-
-**原理**​：BPE 的一个变种，但**在字节级别**进行操作，而不是 Unicode 字符级别。
-
-- **优点**​：
-
-  1. **终极词汇表**​：基础词汇表只有 256 个（所有字节），从根本上解决了 OOV 问题。
-  2. **语言无关**​：可以表示任何文本、任何语言的任何字符，甚至是 Emoji 和特殊文件格式。
-- **缺点**​：可能会导致更长的序列（因为需要多个字节来表示一个复杂字符）。
-- **现状**​：这是当前最先进、最鲁棒的分词方案，被最新的主流模型广泛采用。
-
 ### 文本对齐
 
 #### 左对齐、右对齐、填充、截断
@@ -1250,153 +1697,6 @@ class MultiHeadAttention(nn.Module):
 - **[MASK]**​：仅在训练时使用，推理时不会出现
 - **[PAD]**​：在训练和推理时都会出现
 - **[BOS]/[EOS]**​：在两种模式下都起作用
-
-### 注意力机制优化
-
-Transformer 的标准自注意力机制虽然强大，但其计算复杂度随序列长度呈平方级增长（O(n²)），限制了处理长序列的能力。线性注意力和稀疏注意力是两种主要的高效注意力变体，旨在降低计算成本的同时保持模型性能。
-
-#### 线性注意力（Linear Attention）
-
-线性注意力通过**数学重构**将计算复杂度从 O(n²) 降低到 O(n)。其关键思想是利用**矩阵乘法的结合律**改变计算顺序，避免显式计算 n×n 的注意力矩阵。
-
-**线性注意力公式**​（核函数近似）：
-
-$$
-LinearAttention(Q,K,V)=ϕ(Q)(ϕ(K)^TV)
-$$
-
-其中 ϕ 是一个特征映射函数（如 ϕ(x)=elu(x)+1），将计算重排为先计算 ϕ(K)V（复杂度 O(n)），再与 ϕ(Q)相乘。
-
-**低秩投影变体**​（如 Linformer）：
-
-$$
-Attention(Q,K,V)=softmax(\frac{1}{d_k}Q(EK)^T)(FV)
-$$
-
-这里 E 和 F 是投影矩阵，将 Key 和 Value 的序列长度从 n 压缩到 k（k ≪ n），复杂度降至 O(nk)。
-
-- **应用场景**​：处理长文本序列（如文档翻译），其中序列长度 n=1000 时，标准注意力需计算 100 万次点积，而线性注意力仅需线性次计算。
-- **效果**​：在保持 90% 以上性能的同时，计算量减少约 75%（如 DeepSeek 模型仅用 1/4 算力达到相近效果）。
-
-#### Kimi Delta Attention（KDA）
-
-[Kimi Delta Attention（KDA）](https://arxiv.org/abs/2510.26692) 是 Kimi Linear 提出的线性注意力变体，也是 Kimi K3 的核心序列混合算子之一。它在 Gated DeltaNet 的 delta rule 上，把按头共享的遗忘门细化为**按通道独立的衰减率**，以更精确地管理有限大小的循环记忆状态。
-
-设每个头维护状态 $S_t \in \mathbb{R}^{d_k \times d_v}$，$\alpha_t$ 是通道级遗忘门，$\beta_t$ 是写入步长，则其递推可写为：
-
-$$
-S_t = (I - \beta_t k_t k_t^\top)\operatorname{Diag}(\alpha_t)S_{t-1} + \beta_t k_t v_t^\top,
-\qquad o_t = S_t^\top q_t
-$$
-
-- **线性解码状态**：KDA 保存固定大小的 $S_t$，而不是随上下文线性增长的 KV cache；因此自回归解码的状态内存不随序列长度增长。
-- **细粒度遗忘**：$\alpha_t$ 逐通道控制旧记忆保留多少，$\beta_t$ 控制新键值关联写入多少；这比每头一个标量遗忘门更灵活。
-- **高效并行**：训练/prefill 时可用分块并行算法，生成时使用递推状态更新；Moonshot 还开源了 [FlashKDA](https://github.com/MoonshotAI/FlashKDA) 内核。
-- **与 MLA 的区别**：MLA 仍是全局 softmax 注意力，只是压缩 KV cache；KDA 则以有限状态的线性递推取代大部分全局注意力。因此二者可互补，而非互相替代。
-- **Kimi K3 的用法**：[Kimi K3](https://github.com/MoonshotAI/Kimi-K3) 的 93 层中包含 69 层 KDA 和 24 层 Gated MLA。这样的混合结构让 KDA 负责大部分高效长程状态传递，而 MLA 周期性提供全局信息交互。
-
-#### 稀疏注意力（Sparse Attention）
-
-稀疏注意力通过**限制每个 token 的注意力范围**，只计算最关键的连接，避免全序列交互。常见方法包括滑动窗口、全局 token 和随机采样.稀疏注意力没有统一公式，而是通过**掩码矩阵** M 实现：
-
-$$
-SparseAttention(Q,K,V)=softmax(\frac{1}{d_k}QK^T+M)V
-$$
-
-掩码 M 定义哪些位置允许交互：
-
-- Mij=0 允许计算注意力。
-- Mij=−∞ 禁止计算（被忽略）。
-
-##### 主要稀疏模式
-
-1. **滑动窗口注意力**​（如 Longformer）：
-
-   - 每个 token 只关注前后 w 个邻近 token（窗口大小 w）。
-   - **例子**​：序列长度 n=1000, w=512，计算量从 100 万次降至 51.2 万次。
-2. **全局注意力**​（如 BigBird）：
-
-   - 指定部分 token（如 [CLS]）具有全局视野，可关注所有位置。
-   - **例子**​：在分类任务中，[CLS] token 全局关注全文，其他 token 局部关注。
-3. **随机注意力**​：
-
-   - 每个 token 随机关注少量其他 token（如 k=10），引入长程依赖的随机性。
-   - **例子**​：BigBird 结合滑动窗口、全局 token 和随机注意力，近似完整注意力能力。
-
-##### 计算效率
-
-- **复杂度**​：从 O(n²) 降至 O(n) 或 O(n log n)。
-- **实际效果**​：在 Longformer 中，处理 4000 token 的序列时，内存占用降低 40%，推理速度提升 2-3 倍。
-
-#### 结构化注意力（Structured Attention）
-
-- 核心思想​：为注意力权重施加某种结构先验，而不是完全自由学习。例如，让注意力权重分布符合一个潜在的树结构或语法结构。
-- 为什么有效​：将人类对语言结构的先验知识（如句法）注入模型，可能让模型更高效地学习。
-- 典型代表​：相关工作更多出现在学术论文中，旨在让模型自动学习序列背后的隐结构。
-
-#### 多模态与跨领域注意力
-
-- 核心思想​：将注意力机制应用于非文本数据或不同模态数据之间。
-- 典型代表​：
-
-  - Vision Transformer (ViT)​：将图像切分成 Patch，每个 Patch 视为一个 Token，然后直接应用 Transformer 的自注意力机制，颠覆了 CNN 在 CV 领域的统治地位。
-  - Cross-Attention​：已经在 Encoder-Decoder 架构中见过它。它同样广泛应用于多模态任务（如图像描述生成、视觉问答），让一种模态（如文本）的 Query 去关注另一种模态（如图像）的 Key 和 Value。
-
-### 注意力变体
-
-这一节按“信息如何连接”和“KV 缓存如何存储”两条线分类。线性注意力、稀疏注意力和 FlashAttention 分别见上一节和后文；它们主要改变复杂度或实现，而不等同于下面的头部/KV 架构变体。
-
-#### 因果自注意力与交叉注意力
-
-- **双向自注意力（bidirectional self-attention）**：每个 token 都能关注整个输入序列，常用于 Encoder，例如 BERT。
-- **因果自注意力（causal / masked self-attention）**：通过上三角掩码禁止关注未来 token，是 Decoder-Only 语言模型生成时的基本形式。
-- **交叉注意力（cross-attention）**：$Q$ 来自当前序列，$K,V$ 来自另一序列或模态；常用于 Encoder-Decoder 翻译和图文多模态融合。
-
-#### MHA（多头注意力，Multi-Head Attention）
-
-MHA 为每个头分别学习 $Q,K,V$ 投影，在多个表示子空间并行建模依赖关系，再拼接输出。
-
-$$
-\text{MultiHead}(Q,K,V) = \text{Concat}(\text{head}_1,\ldots,\text{head}_h)W^O
-$$
-
-$$
-\text{head}_i = \text{Attention}(QW_i^Q,KW_i^K,VW_i^V)
-$$
-
-#### MQA（多查询注意力，Multi-Query Attention）
-
-MQA 保留多个独立的查询头，但让所有头共享一组 Key 和 Value 投影：
-
-$$
-\text{head}_i = \text{Attention}(QW_i^Q,KW^K,VW^V), \quad i=1,\ldots,h
-$$
-
-- **收益**：KV cache 从 $h$ 组降至 1 组，显著降低增量解码的内存带宽需求。
-- **权衡**：共享 KV 形成更强的信息瓶颈，质量或训练稳定性可能略逊于 MHA。
-
-#### GQA（分组查询注意力，Grouped-Query Attention）
-
-GQA 是 MHA 与 MQA 之间的折中。设查询头数为 $h_q$、KV 头数为 $h_{kv}$，其中 $1 < h_{kv} < h_q$；每个 KV 头服务 $h_q / h_{kv}$ 个查询头。
-
-$$
-\text{head}_{g,i} = \text{Attention}(QW_{g,i}^Q,KW_g^K,VW_g^V)
-$$
-
-- **收益**：KV cache 大小约为 MHA 的 $h_{kv}/h_q$，质量通常接近 MHA。
-- **应用**：已成为现代 Decoder-Only 模型常见的推理效率设计。
-
-#### MLA（多头潜在注意力，Multi-Head Latent Attention）
-
-MLA 由 DeepSeek-V2 提出。它不直接缓存每个头的 $K,V$，而是先把 KV 信息压缩到低维潜变量 $c_t^{KV}$；推理时缓存该潜变量并按需要恢复注意力所需表示。
-
-$$
-c_t^{KV} = x_t W^{DKV}, \qquad [K_t;V_t] \approx c_t^{KV} W^{UKV}
-$$
-
-- **收益**：在保留多头表达能力的同时大幅压缩 KV cache，尤其适合长上下文和高并发解码。
-- **实现要点**：MLA 与 RoPE 的位置分量需分开处理，工程实现通常会通过矩阵吸收（matrix absorption）减少显式恢复开销。
-- **权衡**：训练和推理内核更复杂；它优化的是缓存与带宽，不会消除标准注意力随序列长度增长的二次计算。
 
 ### 位置编码
 
@@ -1607,176 +1907,6 @@ $$
 **缺点**​：泛化到长序列时可能较差（需要外推或微调），且需要更多参数。
 **例子**​：BERT、GPT-2 等模型使用可学习的位置编码。
 
-### 激活函数
-
-激活函数与 FFN 结构需要区分：ReLU、GELU、SiLU/Swish 是点激活函数；GLU、SwiGLU、GeGLU 则是带门控的双分支 FFN 结构。当前大模型中，GLU 变体仍很常见，但不能简单概括为所有模型都默认使用同一个激活函数。
-
-#### ReLU：经典基线
-
-$$
-\mathrm{ReLU}(x)=\max(0,x)
-$$
-
-ReLU 计算简单，但存在“Dead ReLU”、输出非零中心以及负半轴梯度为零等问题，因此在现代大语言模型的 FFN 中通常不是首选；在 CNN 等场景中仍然有价值。
-
-#### GLU：门控结构
-
-**GLU (Gated Linear Unit)** 不是单一激活函数，而是一种通过逐元素乘法控制信息流的结构：
-
-$$
-\mathrm{GLU}(x)=(xW+b)\otimes\sigma(xV+c)
-$$
-
-其中 $\sigma(xV+c)$ 是 sigmoid 门控分支，输出位于 $[0,1]$；$(xW+b)$ 是信息分支。
-
-#### SwiGLU 与 GeGLU：主流变体
-
-$$
-\mathrm{SwiGLU}(x)=\mathrm{Swish}(xW+b)\otimes(xV+c)
-$$
-
-$$
-\mathrm{GeGLU}(x)=\mathrm{GELU}(xW+b)\otimes(xV+c)
-$$
-
-- **SwiGLU**：使用平滑、非单调的 Swish/SiLU 分支。
-- **GeGLU**：使用 GELU 分支。
-- 两者都保留了 GLU 的“双分支逐元素相乘”结构。
-
-**近期判断：**SwiGLU/GeGLU 仍是大型 Transformer FFN 的常见方案，但激活函数并没有形成永久不变的“王者”。实际选型还会受到模型家族、MoE/稠密结构、参数预算、量化方案和硬件内核支持的影响。
-### 矩阵维度变化
-
-#### 通用参数定义
-
-首先定义一些通用维度参数：
-
-- B: Batch Size (批大小)
-- S: Source Sequence Length (源序列长度，Encoder 输入)
-- T: Target Sequence Length (目标序列长度，Decoder 输入/输出)
-- D: Model Dimension (模型维度，d_model)
-- H: Number of Attention Heads (注意力头数)
-- d_k: Key/Query Dimension (每个头的键/查询维度，通常 d_k = d_v = D/H)
-- d_v: Value Dimension (每个头的值维度)
-- d_ff: Feed-Forward Dimension (前馈网络中间层维度，通常 4×D)
-
-#### Encoder 各层维度变化
-
-##### 1. 输入嵌入层 (Input Embedding)
-
-- 输入: 词索引序列，形状为 (_B_,_S_)
-- 输出: 词向量矩阵，形状为 (_B_,_S_,_D_)
-
-##### 2. 位置编码 (Positional Encoding)
-
-- 输入: (_B_,_S_,_D_)
-- 位置编码矩阵: (_S_,_D_)(扩散到每个 batch)
-- 输出: (_B_,_S_,_D_)(输入嵌入 + 位置编码)
-
-##### 3. 第 l 层 Encoder 内部
-
-###### 子层 1: 多头自注意力
-
-1. Q/K/V 线性投影:
-
-   - 输入: (_B_,_S_,_D_)
-   - 权重: $W_Q,W_K,W_V$每个形状为 ($D,d_k$)(或合并为 ($D,3d_k$))
-   - 输出: _Q_,_K_,_V_每个形状为 (_B_,_S_,$d_k$)
-2. 多头分割与转置:
-
-   - 输入: _Q_,_K_,_V_每个 (_B_,_S_,$d_k$)
-   - 重塑: (_B_,_S_,_H_,$d_k$)→ 转置为 (_B_,_H_,_S_,$d_k$)
-3. 注意力计算:
-
-   $$
-   K^T
-   $$
-
-   - : (_B_,_H_,_S_,$d_k$)×(_B_,_H_,$d_k$,_S_)→(_B_,_H_,_S_,_S_)
-   - Softmax 后乘 V: (_B_,_H_,_S_,_S_)×(_B_,_H_,_S_,$d_v$)→(_B_,_H_,_S_,$d_v$)
-4. 多头合并与输出投影:
-
-   - 转置并合并: (_B_,_H_,_S_,$d_v$)→(_B_,_S_,_H_×$d_v$)=(_B_,_S_,_D_)
-   - 输出投影: 保持 (_B_,_S_,_D_)
-5. 残差连接与层归一化:
-
-   - 输出: (_B_,_S_,_D_)
-
-###### 子层 2: 前馈神经网络
-
-1. 第一层线性变换:
-
-   - 输入: (_B_,_S_,_D_)
-   - 权重: $W_1$形状为 (_D_,$d_{ff}$)
-   - 输出: (B,S,$d_{ff}$)
-2. 激活函数:
-
-   - 输出:  (B,S,$d_{ff}$)
-3. 第二层线性变换:
-
-   - 权重: $W_2$形状为 ($d_{ff}$,_D_)
-   - 输出: (_B_,_S_,_D_)
-4. 残差连接与层归一化:
-
-   - 输出: (_B_,_S_,_D_)(作为下一层输入或最终编码器输出)
-
-编码器最终输出: (_B_,_S_,_D_)
-
-#### Decoder 各层维度变化
-
-##### 1. 输入处理
-
-- 目标输入: 右移的目标序列，形状为 (_B_,_T_)
-- 输出嵌入: (_B_,_T_,_D_)
-- 位置编码: (_B_,_T_,_D_)
-
-##### 2. 第 l 层 Decoder 内部
-
-###### 子层 1: 掩码多头自注意力
-
-1. Q/K/V 投影 (同 Encoder):
-
-   - 输入: (_B_,_T_,_D_)
-   - 输出: _Q_,_K_,_V_每个 (_B_,_T_,$d_k$)
-2. 掩码注意力计算:
-
-   - 注意力分数: (_B_,_H_,_T_,_T_)(下三角掩码)
-   - 其余计算同 Encoder
-   - 输出: (_B_,_T_,_D_)
-
-###### 子层 2: 编码器-解码器注意力 (交叉注意力)
-
-这是最关键的维度交互：
-
-1. Query 来自解码器:
-
-   - 输入: 子层 1 输出 (_B_,_T_,_D_)
-   - → (_B_,_T_,_dk_)
-2. Key, Value 来自编码器:
-
-   - 输入: 编码器最终输出 (_B_,_S_,_D_)
-   - → (_B_,_S_,_dk_)
-   - → (_B_,_S_,_dv_)
-3. 注意力计算:
-
-   $$
-   K^T
-   $$
-
-   - : (_B_,_H_,_T_,$d_k$)×(_B_,_H_,$d_k$,_S_)→(_B_,_H_,_T_,_S_)
-   - 这里维度变化很重要: 查询长度是 _T_，键长度是 _S_
-   - 输出: (_B_,_T_,_D_)
-
-###### 子层 3: 前馈神经网络
-
-- 同 Encoder 的前馈网络
-- 输入: (_B_,_T_,_D_)
-- 输出: (_B_,_T_,_D_)
-
-##### 3. 输出层
-
-- 线性投影: (_B_,_T_,_D_)×(_D_,_V_)→(_B_,_T_,_V_)(V 是词汇表大小)
-- Softmax: 概率分布 (_B_,_T_,_V_)
-
 ### Batch Normalization (BN) 与 Layer Normalization (LN)
 
 BN 和 LN 的核心思想都是通过归一化来稳定训练过程，加速收敛。它们的**根本区别在于归一化所沿的维度（轴）不同**。
@@ -1845,76 +1975,6 @@ Transformer 选择 LN 而非 BN，主要基于以下几点关键原因：
 3. **Softmax 的“饱和区”​**​：Softmax 函数对输入的绝对值非常敏感。当一个值远大于其他值时，其对应的 Softmax 输出会非常接近 1，而其他输出则接近 0。此时，函数的梯度会变得非常小（饱和），这被称为“梯度消失”问题，会严重减慢模型的训练速度。
 4. **缩放的作用**​：通过将点积结果除以 $\sqrt{d_k}$，我们将点积的方差重新缩放为 1。
 5. 这样做的结果是，​**Softmax 函数的输入值被控制在一个更合适的范围内**，从而避免了函数进入梯度饱和区，确保了训练过程中有足够大的梯度流，使模型能够更有效地学习。
-
-### 优化器（Optimizer）
-
-优化器根据损失函数的梯度更新参数：
-
-$$
-\theta_{t+1} = \theta_t - \eta \cdot \nabla L(\theta_t)
-$$
-
-这里的关键差异在于：是否累积历史梯度、是否按参数自适应缩放，以及是否利用矩阵参数的几何结构。
-
-#### SGD、Momentum 与 NAG
-
-- **SGD**：直接沿当前梯度方向更新，简单但在狭长损失谷中容易震荡。
-- **Momentum**：累积梯度的一阶动量，在方向一致时加速、在来回震荡时平滑更新。
-
-$$
-v_t = \gamma v_{t-1} + \nabla L(\theta_t), \qquad \theta_{t+1} = \theta_t - \eta v_t
-$$
-
-- **NAG（Nesterov Accelerated Gradient）**：先按历史动量“预走一步”，再在预估位置计算梯度；通常比普通 Momentum 更早修正方向。
-
-#### 自适应学习率：Adagrad、RMSprop、Adam 与 AdamW
-
-- **Adagrad**：按参数累计梯度平方，为稀疏特征提供较大的相对学习率；但累计量单调增加，学习率可能过快衰减。
-
-$$
-G_t = G_{t-1} + g_t^2, \qquad \theta_{t+1} = \theta_t - \frac{\eta}{\sqrt{G_t} + \epsilon} g_t
-$$
-
-- **RMSprop**：用梯度平方的指数滑动平均取代累计和，避免 Adagrad 的持续衰减。
-
-$$
-v_t = \rho v_{t-1} + (1-\rho)g_t^2, \qquad \theta_{t+1} = \theta_t - \frac{\eta}{\sqrt{v_t} + \epsilon}g_t
-$$
-
-- **Adam**：结合一阶动量和二阶矩的自适应缩放。
-
-$$
-m_t = \beta_1m_{t-1} + (1-\beta_1)g_t, \qquad v_t = \beta_2v_{t-1} + (1-\beta_2)g_t^2
-$$
-
-$$
-\theta_{t+1} = \theta_t - \eta \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon}
-$$
-
-- **AdamW**：将权重衰减与 Adam 的自适应更新解耦，是训练 Transformer 的常用基线。
-
-$$
-\theta_{t+1} = (1-\eta\lambda)\theta_t - \eta \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon}
-$$
-
-#### Muon：对矩阵更新做正交化
-
-[Muon](https://github.com/KellerJordan/Muon)（2024）是面向神经网络**隐藏层二维权重矩阵**的优化器。它先计算带动量的更新，再近似取其极分解（polar decomposition）中的正交因子，使更新的奇异值更均衡，而不是像 AdamW 那样逐元素缩放。
-
-对于矩阵参数 $W$，可以把其核心过程概括为：
-
-$$
-B_t = \mu B_{t-1} + (1-\mu)\nabla_W L, \qquad \Delta W_t = \operatorname{Orthogonalize}(B_t)
-$$
-
-$$
-W_{t+1} = W_t - \eta \Delta W_t
-$$
-
-- **如何高效实现**：不必执行昂贵的 SVD；实践中通常用固定步数的 Newton--Schulz 迭代近似正交化。
-- **适用参数**：通常用于线性层和卷积层等二维（或可展平为二维）的隐藏权重。
-- **不要一刀切替换 AdamW**：Embedding、输出头、偏置、LayerNorm/RMSNorm 的缩放参数等往往继续使用 AdamW；Muon 的参考实现也采用这种混合参数组。
-- **优势与限制**：它在部分 Transformer 训练实验中展现出很好的数据效率和大批量训练表现，但学习率、权重衰减、分布式正交化开销都需要重新验证；把它视为有前景的训练优化方案，而不是 AdamW 的无条件替代品。
 
 ### 显存与量化
 
@@ -2130,74 +2190,6 @@ LoRA 核心配置（1B 参数模型）：rank=8（低秩维度），仅训练线
 <td>**总计**<br/></td><td>~4.12GB<br/></td></tr>
 </table>
 
-### Flash Attention
-
-FlashAttention 是注意力层的 **IO-aware kernel/算法优化**，不是一种新的注意力架构。它仍然计算标准的精确 softmax attention，核心目标是减少 GPU HBM 与片上 SRAM 之间的读写，并提高 GPU 利用率。
-
-#### 核心机制
-
-1. **分块计算（Tiling）**：将 $Q,K,V$ 按序列和头维度分块，只把当前需要的 tile 放入片上 SRAM。
-2. **在线 Softmax（Online Softmax）**：分块维护每行的 running max 和归一化因子，不物化完整的 $QK^\top$ 注意力矩阵。
-3. **反向传播重计算（Recomputation）**：前向只保存必要统计量，反向时重新计算注意力块，以时间换显存。
-4. **内核融合与硬件流水线**：融合矩阵乘法、Softmax 和输出累积，并针对不同 GPU 架构使用并行切分、异步拷贝、warp specialization 等优化。
-
-分块降低的是 **HBM IO 和中间注意力矩阵的存储开销**，并没有把标准全注意力的计算复杂度从 $O(N^2)$ 变成线性；注意力的核心矩阵乘法仍然是 $O(N^2)$ 计算。
-
-#### 版本演进
-
-| 版本 | 主要特点 | 典型硬件/状态 |
-| --- | --- | --- |
-| FlashAttention-1 | IO 感知分块、在线 Softmax、反向重计算 | Ampere 等 GPU；2022 年论文 |
-| FlashAttention-2 | 更好的并行化和工作分区，提升长序列吞吐 | Ampere、Ada、Hopper；支持更大 head dimension |
-| FlashAttention-3 | 面向 Hopper 的异步流水线和硬件利用率优化；官方实现包含 FP16/BF16 前向与反向、FP8 前向 | H100/H800；beta/实验性组件 |
-| FlashAttention-4 | 基于 CuTeDSL 的新实现，面向 Hopper 与 Blackwell | H100、B200 等；具体支持随版本和 CUDA 环境变化 |
-
-FlashAttention-3/4 的支持范围、安装方式和性能会随 CUDA、GPU 架构、数据类型及 kernel 后端变化，不能只按版本号判断实际速度。
-
-#### 需要避免的表述
-
-1. **不是近似注意力**：FlashAttention 不使用低秩近似或稀疏近似，但不同 kernel 的浮点舍入结果可能存在微小差异。
-2. **不是无限长上下文方案**：它主要节省 IO 和显存，实际上下文长度仍受模型、KV cache、硬件和服务端调度限制。
-3. **不等于 KV cache 管理**：FlashAttention 优化单次注意力计算；KV cache 分页、复用、调度属于推理运行时的职责。
-
-### LLM 推理部署优化：vLLM 与 SGLang
-
-FlashAttention 解决的是“一个注意力算子如何算得更快”，而 vLLM、SGLang 解决的是“很多请求如何共同运行得更高效”。两者通常会调用 FlashAttention、FlashInfer、Triton 或其他硬件后端，因此不是互相替代关系。
-
-#### vLLM：通用高吞吐推理运行时
-
-vLLM 的核心优化包括：
-
-- **PagedAttention**：将 KV cache 切分成固定大小的 block，减少连续显存分配和碎片，并支持更灵活的批处理。
-- **Continuous Batching**：请求动态进入和退出 batch，提高 GPU 在 prefill/decode 混合负载下的利用率。
-- **Chunked Prefill**：将很长的输入分块预填充，减少长请求对正在 decode 请求的阻塞。
-- **Automatic Prefix Caching**：复用共享前缀的 KV cache，适合多轮对话、RAG 和 agent 工作流。
-- **Speculative Decoding**：使用草稿模型、n-gram 或其他提议器一次提出多个 token，再由目标模型验证。
-- **量化与并行部署**：支持多种权重量化、KV cache 量化，以及 tensor/pipeline/data/expert/context parallelism；还支持 prefill/decode 分离等分布式部署方式。
-- **后端选择**：可根据硬件和模型选择 FlashAttention、FlashInfer、Triton 等 attention/GEMM kernel。
-
-#### SGLang：前缀复用与结构化生成友好的运行时
-
-SGLang 的代表性优化包括：
-
-- **RadixAttention**：用 radix tree 管理并复用共享前缀的 KV cache，适合多轮对话、few-shot、RAG 和 agent 场景。
-- **低开销调度与 Continuous Batching**：减少 CPU 调度开销，并对动态请求进行批处理。
-- **Chunked Prefill 与 Prefill-Decode Disaggregation**：将 prefill 和 decode 拆分到不同实例或资源池，降低长输入对 decode 延迟的影响。
-- **Speculative Decoding、Paged Attention 和多维并行**：支持投机解码，以及 tensor/pipeline/data/expert parallelism。
-- **HiCache**：在 GPU 显存、主机内存和外部存储之间构建分层 KV cache，扩展长上下文和跨请求缓存能力。
-- **量化、多 LoRA 与 kernel 后端**：支持多种量化和多 LoRA batching，并可使用 FlashInfer、FlashAttention、Triton 等后端；具体能力取决于版本、硬件和模型架构。
-
-#### 三者关系
-
-```text
-FlashAttention / FlashInfer / Triton
-        ↓  注意力与矩阵计算 kernel
-vLLM / SGLang
-        ↓  KV cache、调度、批处理、并行、量化、服务 API
-线上推理服务
-```
-
-简单区分：单算子性能看 kernel；高并发吞吐看 batching 与 KV cache 管理；长上下文和多轮复用重点看 prefix cache/HiCache；大规模集群还要考虑并行策略和 prefill-decode 分离。
 # LLM Application
 
 ## 知识蒸馏
