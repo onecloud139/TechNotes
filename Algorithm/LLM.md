@@ -60,13 +60,9 @@ Transformer 架构 + 海量数据 + 超大算力，开启了预训练时代。
 
 # LLM Structure
 
-## 概述
-
 Transformer 是一种完全基于自注意力机制的深度学习模型架构，它在处理序列数据（如文本、语音）方面表现出色，已成为现代大语言模型（如 GPT、BERT）的基石。
 
-### 核心机制详解
-
-Transformer 的优势源于其精妙的内部设计，以下几个机制尤为关键：
+## 核心机制
 
 1. **自注意力与多头注意力**
 2. 自注意力机制通过计算**查询（Query）、键（Key）、值（Value）​** 矩阵，使序列中每个位置都能直接与所有位置交互。其核心公式为：
@@ -89,21 +85,12 @@ $$
    - **残差连接**​：将子层输入直接绕过该层加到输出上，确保梯度能有效反向传播，极大缓解了深层网络的梯度消失问题。
    - **层归一化**​：对每个样本的所有特征维度进行归一化，稳定训练过程，加速收敛。
 
-### 著名模型变体与演进
-
 基于 Transformer 的核心思想，衍生出多种影响深远的模型架构：
 
 - **仅编码器**​：如 **BERT**。通过“掩码语言模型”进行预训练，深度理解语言的双向上下文，擅长文本分类、问答等理解类任务。
 - **仅解码器**​：如 **GPT 系列**。采用掩码自注意力，确保生成每个词时只依赖之前的词，非常适合文本生成、对话等自回归任务。
 - **编码器-解码器**​：如 **T5**。将几乎所有 NLP 任务都统一为“文本到文本”的格式，适用于翻译、摘要等需要同时理解输入并生成输出的任务。
 
-### 面临挑战
-
-尽管 Transformer 优势明显，但也面临以下挑战，这也正是当前的研究热点和改进方向：
-
-- **计算复杂度**​：自注意力机制的计算复杂度随序列长度呈 O($n^2$)增长，处理极长文本（如整本书）时对计算和内存需求极高。
-- **数据与算力**​：大规模 Transformer 模型需要海量训练数据和巨额计算资源，门槛较高。
-- **长序列处理**​：虽然能建模长距离依赖，但二次方复杂度使其处理长序列时依然困难，催生了 **Longformer**、**Linformer** 等高效注意力机制的研究。
 
 ## Encoder
 
@@ -125,34 +112,40 @@ Transformer 的 Encoder 是一个功能强大的组件，其核心任务是将�
 
 ### 二、分步详解与公式
 
-我们逐步拆解数据在 Encoder 中的流动过程。假设输入序列是 `X`，其维度为 `[seq_len,d_model]`。
+我们逐步拆解数据在 Encoder 中的流动过程。设序列长度为 $S=seq_len$，模型维度为 $D=d_model$。不考虑 batch 时，隐藏状态形状为 `[S,D]`；带 batch 时为 `[B,S,D]`。
 
 #### 步骤 1：输入嵌入与位置编码
 
 1. **输入嵌入**​： 将每个输入词元（如单词）转换为一个向量。
 
    - $X_{embed}=Lookup(Input)$
+   - 输入 Token ID 形状：`[seq_len]`；Token Embedding 表形状：`[vocab_size, d_model]`。
+   - $X_{embed}$ 维度：`[seq_len, d_model]`；带 batch 时为 `[B,S,D]`。
    - 维度： `[seq_len, d_model]`
 1. **位置编码**​： 由于自注意力机制本身没有位置信息，需要注入序列的顺序信息。
 
-   - PE： 使用正弦余弦函数或可学习参数生成的位置编码矩阵。
+   - PE： 使用正弦余弦函数或可学习参数生成的位置编码矩阵，形状为 `[seq_len, d_model]`。
    - $X_{in}=X_{embed}+PE$
    - 维度： `[seq_len, d_model]`
    - $X_{in}$将作为第一层 Encoder 的输入。
 
 #### 步骤 2：单层 Encoder 的内部计算
 
-令第 l 层的输入为 $H_i$，其中 $H_0=X_{in}$。
+令第 $l$ 层的输入为 $H_l$，其中 $H_0=X_{in}$，形状为 `[seq_len, d_model]`（带 batch 时为 `[B,S,D]`）。
 
 **子层 1：多头自注意力**
 
-1. **查询、键、值投影**​： 对于每个注意力头，将输入$H_i$线性投影到三个不同的空间。
+1. **查询、键、值投影**​： 对于每个注意力头，将输入 $H_l$ 线性投影到三个不同的空间。
 
-   -  $Q_i=H_iW_{Q_i},K_i=H_iW_{K_i},V_i=H_iW_{V_i}$
+   -  $Q_i=H_lW_{Q_i},K_i=H_lW_{K_i},V_i=H_lW_{V_i}$
+   - 单个头的权重形状：$W_{Q_i},W_{K_i}\in[D,d_k]$，$W_{V_i}\in[D,d_v]$；通常 $d_k=d_v=D/H$。
    - 维度： `[seq_len, d_k]`(通常 `d_k = d_v = d_model / num_heads`)
+   - 单个头的 $Q_i,K_i,V_i$ 形状分别为 `[S,d_k]`、`[S,d_k]`、`[S,d_v]`；所有头合并后为 `[B,H,S,d_k]`、`[B,H,S,d_k]`、`[B,H,S,d_v]`。
 2. **缩放点积注意力**​： 计算每个头内部的注意力。
 
 $$ Attention(Q,K,V)=softmax(\frac{QK^T}{\sqrt{d_k}})V $$
+
+单个头中，$QK^T$ 的形状为 `[S,S]`，Softmax 权重仍为 `[S,S]`，乘以 $V$ 后输出为 `[S,d_v]`；批量多头形式分别为 `[B,H,S,S]` 和 `[B,H,S,d_v]`。
 
    - 公式解释：
      - $QK^T$： 计算每个词元作为“查询”时，与所有词元作为“键”的相似度得分矩阵。
@@ -164,9 +157,11 @@ $$ Attention(Q,K,V)=softmax(\frac{QK^T}{\sqrt{d_k}})V $$
    -  $MultiHead(Q,K,V)=Concat(head_1,...,head_h)W_O$
    -  $head_i=Attention(Q_i,K_i,V_i)$
    - 维度： 输出变回 `[seq_len, d_model]`
+   - 单个头输出为 `[S,d_v]`；拼接后为 `[S,H×d_v]`。输出投影矩阵 $W_O$ 形状为 `[H×d_v,D]`，最终输出为 `[S,D]`（带 batch 时为 `[B,S,D]`）。
 4. **残差连接与层归一化**​：
 
    -  $Z_1^l=LayerNorm(H_l+MultiHead(H_lW_{Q_l},H_lW_{K_l},H_lW_{V_l}))$
+   - $H_l$、Multi-Head 输出和 $Z_1^l$ 的形状都为 `[S,D]`（带 batch 时为 `[B,S,D]`）。
    - 注意：在自注意力中，Q, K, V 都来自同一来源 $H_l$，故称“自”注意力。
 
 **子层 2：前馈神经网络**
@@ -176,11 +171,14 @@ $$ Attention(Q,K,V)=softmax(\frac{QK^T}{\sqrt{d_k}})V $$
 1. **前馈计算**​：
 
    -  $FFN(x)=max(0,xW_1+b_1)W_2+b_2$
+   - $x$ 形状为 `[S,D]`；$W_1$ 形状为 `[D,d_{ff}]`，$b_1$ 形状为 `[d_{ff}]`，中间激活形状为 `[S,d_{ff}]`。
    - 通常中间层的维度会扩大，如 $d_{ff}=4×d_{model}$，然后再投影回 $d_{model}$。
+   - $W_2$ 形状为 `[d_{ff},D]`，$b_2$ 形状为 `[D]`，因此 FFN 输出回到 `[S,D]`。
    -  $FFN(Z_1^l)$的维度： `[seq_len, d_model]`
 2. **残差连接与层归一化**​：
 
    -  $H_{l+1}=LayerNorm(Z_1^l+FFN(Z_1^l))$
+   - 输入和输出形状均为 [S,D]（带 batch 时为 [B,S,D]）。
    -  $H_{l+1}$将作为下一层（第 l+1 层）的输入。
 
 #### 步骤 3：堆叠与输出
@@ -192,69 +190,6 @@ $$ Attention(Q,K,V)=softmax(\frac{QK^T}{\sqrt{d_k}})V $$
 
 这个输出是一个丰富的表示矩阵，其中每个行向量都包含了整个输入序列的上下文信息。它可以被送入 Decoder（在原始 Transformer 中用于翻译），或者直接用于各种任务（如文本分类、BERT 等）。
 
-### 矩阵维度变化
-
-#### 各层维度变化
-
-##### 1. 输入嵌入层 (Input Embedding)
-
-- 输入: 词索引序列，形状为 (_B_,_S_)
-- 输出: 词向量矩阵，形状为 (_B_,_S_,_D_)
-
-##### 2. 位置编码 (Positional Encoding)
-
-- 输入: (_B_,_S_,_D_)
-- 位置编码矩阵: (_S_,_D_)(扩散到每个 batch)
-- 输出: (_B_,_S_,_D_)(输入嵌入 + 位置编码)
-
-##### 3. 第 l 层 Encoder 内部
-
-###### 子层 1: 多头自注意力
-
-1. Q/K/V 线性投影:
-
-   - 输入: (_B_,_S_,_D_)
-   - 权重: $W_Q,W_K,W_V$每个形状为 ($D,d_k$)(或合并为 ($D,3d_k$))
-   - 输出: _Q_,_K_,_V_每个形状为 (_B_,_S_,$d_k$)
-2. 多头分割与转置:
-
-   - 输入: _Q_,_K_,_V_每个 (_B_,_S_,$d_k$)
-   - 重塑: (_B_,_S_,_H_,$d_k$)→ 转置为 (_B_,_H_,_S_,$d_k$)
-3. 注意力计算:
-
-   $$
-   K^T
-   $$
-
-   - : (_B_,_H_,_S_,$d_k$)×(_B_,_H_,$d_k$,_S_)→(_B_,_H_,_S_,_S_)
-   - Softmax 后乘 V: (_B_,_H_,_S_,_S_)×(_B_,_H_,_S_,$d_v$)→(_B_,_H_,_S_,$d_v$)
-4. 多头合并与输出投影:
-
-   - 转置并合并: (_B_,_H_,_S_,$d_v$)→(_B_,_S_,_H_×$d_v$)=(_B_,_S_,_D_)
-   - 输出投影: 保持 (_B_,_S_,_D_)
-5. 残差连接与层归一化:
-
-   - 输出: (_B_,_S_,_D_)
-
-###### 子层 2: 前馈神经网络
-
-1. 第一层线性变换:
-
-   - 输入: (_B_,_S_,_D_)
-   - 权重: $W_1$形状为 (_D_,$d_{ff}$)
-   - 输出: (B,S,$d_{ff}$)
-2. 激活函数:
-
-   - 输出:  (B,S,$d_{ff}$)
-3. 第二层线性变换:
-
-   - 权重: $W_2$形状为 ($d_{ff}$,_D_)
-   - 输出: (_B_,_S_,_D_)
-4. 残差连接与层归一化:
-
-   - 输出: (_B_,_S_,_D_)(作为下一层输入或最终编码器输出)
-
-编码器最终输出: (_B_,_S_,_D_)
 
 ## Decoder
 
@@ -284,11 +219,11 @@ Decoder 的输入是**目标序列的右移版本**​（Shifted Right）。
 - 训练时：将目标序列向右移动一位，并在开头添加起始符 `<sos>`
 - 推理时：从起始符开始，逐个生成
 
-输入经过嵌入和位置编码后得到: $H_{dec}^0$
+输入经过嵌入和位置编码后得到 $H_{dec}^0$，形状为 `[T,D]`（带 batch 时为 `[B,T,D]`，其中 $T$ 是目标序列长度）。
 
 #### 步骤 2：单层 Decoder 的内部计算
 
-令第 $l$层 Decoder 的输入为 $H_{dec}^l$，编码器的最终输出为 $H_{enc}^N$。
+令第 $l$ 层 Decoder 的输入为 $H_{dec}^l$，形状为 `[T,D]`（带 batch 时为 `[B,T,D]`）；编码器的最终输出 $H_{enc}^N$ 形状为 `[S,D]`（带 batch 时为 `[B,S,D]`）。
 
 **子层 1：掩码多头自注意力**
 
@@ -299,6 +234,10 @@ Decoder 的输入是**目标序列的右移版本**​（Shifted Right）。
 $$
 MaskedAttention(Q,K,V)=softmax(\frac{QK^T}{\sqrt{d_k}}+M)V
 $$
+单个头的 $Q,K,V$ 形状为 `[T,d_k]`、`[T,d_k]`、`[T,d_v]`，掩码 $M$ 和注意力分数矩阵形状均为 `[T,T]`；多头 batch 形式的分数矩阵为 `[B,H,T,T]`。
+
+其中 $Q,K,V$ 的投影矩阵形状分别为 `[D,d_k]`、`[D,d_k]`、`[D,d_v]`；多头形式分别为 `[B,H,T,d_k]`、`[B,H,T,d_k]`、`[B,H,T,d_v]`。
+
 
 2. 其中掩码矩阵 M 定义为：
 
@@ -324,12 +263,14 @@ $$
 $$
 CrossAttention(Q,K,V)=softmax(\frac{Q_{dec}K_{enc}^T}{\sqrt{d_k}})V_{enc}
 $$
+$Q_{dec}$ 形状为 `[T,d_k]`，$K_{enc}$ 为 `[S,d_k]`，$V_{enc}$ 为 `[S,d_v]`；因此交叉注意力权重形状为 `[T,S]`，输出形状为 `[T,d_v]`，多头 batch 形式为 `[B,H,T,S]`。
+
 
 1. **作用**​：让 Decoder 在生成每个词时，都能"询问"编码器："基于当前已生成的内容，输入序列中哪些部分最相关？"
 2. **残差连接与层归一化**​：
 
 $$
-Z_2^l=LayerNorm(Z_1^l+MaskedMultiHead(Q_{dec}^l,K_{enc}^l,V_{enc}^l))
+Z_2^l=LayerNorm(Z_1^l+CrossMultiHead(Q_{dec}^l,K_{enc}^l,V_{enc}^l))
 $$
 
 **子层 3：前馈神经网络**
@@ -343,6 +284,8 @@ $$
 $$
 H_{dec}^{l+1}=LayerNorm(Z_2^l+FFN(Z_2^l))
 $$
+$Z_2^l$ 形状为 `[T,D]`；FFN 中 $W_1\in[D,d_{ff}]$，中间激活为 `[T,d_{ff}]`，$W_2\in[d_{ff},D]$，最终输出和残差结果均为 `[T,D]`（带 batch 时为 `[B,T,D]`）。
+
 
 #### 步骤 3：输出层
 
@@ -351,64 +294,9 @@ $$
 $$
 P(y_t∣y_{<t},X)=softmax(H_{dec}^NW_{vocab}+b_{vocab})
 $$
+$H_{dec}^N$ 形状为 `[T,D]`，词表投影 $W_{vocab}$ 形状为 `[D,V]`，$b_{vocab}$ 形状为 `[V]`，logits 和概率分布形状为 `[T,V]`（带 batch 时为 `[B,T,V]`）。
 
-### 矩阵维度变化
 
-#### 各层维度变化
-
-##### 1. 输入处理
-
-- 目标输入: 右移的目标序列，形状为 (_B_,_T_)
-- 输出嵌入: (_B_,_T_,_D_)
-- 位置编码: (_B_,_T_,_D_)
-
-##### 2. 第 l 层 Decoder 内部
-
-###### 子层 1: 掩码多头自注意力
-
-1. Q/K/V 投影 (同 Encoder):
-
-   - 输入: (_B_,_T_,_D_)
-   - 输出: _Q_,_K_,_V_每个 (_B_,_T_,$d_k$)
-2. 掩码注意力计算:
-
-   - 注意力分数: (_B_,_H_,_T_,_T_)(下三角掩码)
-   - 其余计算同 Encoder
-   - 输出: (_B_,_T_,_D_)
-
-###### 子层 2: 编码器-解码器注意力 (交叉注意力)
-
-这是最关键的维度交互：
-
-1. Query 来自解码器:
-
-   - 输入: 子层 1 输出 (_B_,_T_,_D_)
-   - → (_B_,_T_,_dk_)
-2. Key, Value 来自编码器:
-
-   - 输入: 编码器最终输出 (_B_,_S_,_D_)
-   - → (_B_,_S_,_dk_)
-   - → (_B_,_S_,_dv_)
-3. 注意力计算:
-
-   $$
-   K^T
-   $$
-
-   - : (_B_,_H_,_T_,$d_k$)×(_B_,_H_,$d_k$,_S_)→(_B_,_H_,_T_,_S_)
-   - 这里维度变化很重要: 查询长度是 _T_，键长度是 _S_
-   - 输出: (_B_,_T_,_D_)
-
-###### 子层 3: 前馈神经网络
-
-- 同 Encoder 的前馈网络
-- 输入: (_B_,_T_,_D_)
-- 输出: (_B_,_T_,_D_)
-
-##### 3. 输出层
-
-- 线性投影: (_B_,_T_,_D_)×(_D_,_V_)→(_B_,_T_,_V_)(V 是词汇表大小)
-- Softmax: 概率分布 (_B_,_T_,_V_)
 
 ## 注意力机制优化
 
@@ -467,7 +355,7 @@ $$
 - Mij=0 允许计算注意力。
 - Mij=−∞ 禁止计算（被忽略）。
 
-### 主要稀疏模式
+主要稀疏模式
 
 1. **滑动窗口注意力**​（如 Longformer）：
 
@@ -481,11 +369,6 @@ $$
 
    - 每个 token 随机关注少量其他 token（如 k=10），引入长程依赖的随机性。
    - **例子**​：BigBird 结合滑动窗口、全局 token 和随机注意力，近似完整注意力能力。
-
-### 计算效率
-
-- **复杂度**​：从 O(n²) 降至 O(n) 或 O(n log n)。
-- **实际效果**​：在 Longformer 中，处理 4000 token 的序列时，内存占用降低 40%，推理速度提升 2-3 倍。
 
 ### 结构化注意力（Structured Attention）
 
@@ -506,6 +389,32 @@ $$
 
 FlashAttention 是注意力层的 **IO-aware kernel/算法优化**，不是一种新的注意力架构。它仍然计算标准的精确 softmax attention，核心目标是减少 GPU HBM 与片上 SRAM 之间的读写，并提高 GPU 利用率。
 
+#### FlashAttention 的数学形式
+
+FlashAttention **不改变注意力的数学结果**，仍然计算：
+
+$$
+S=\frac{QK^\top}{\sqrt{d_k}},\qquad P=\operatorname{softmax}(S),\qquad O=PV
+$$
+
+其中 $Q\in[B,H,S_q,d_k]$，$K\in[B,H,S_k,d_k]$，$V\in[B,H,S_k,d_v]$；$S,P\in[B,H,S_q,S_k]$，$O\in[B,H,S_q,d_v]$。FlashAttention 的关键是**不把完整的 $S$ 或 $P$ 写回 HBM**。
+
+将 $Q$、$K$、$V$ 切成 tile 后，对某一行块维护 running max $m$、归一化因子 $\ell$ 和未归一化输出 $u$。处理新的分数块 $S_{ij}$ 时，可用 online Softmax 更新：
+
+$$
+m_{new}=\max(m_{old},\operatorname{rowmax}(S_{ij}))
+$$
+
+$$
+\ell_{new}=e^{m_{old}-m_{new}}\ell_{old}+\sum_j e^{S_{ij}-m_{new}}
+$$
+
+$$
+u_{new}=e^{m_{old}-m_{new}}u_{old}+\sum_j e^{S_{ij}-m_{new}}V_j,\qquad O_i=\frac{u_{new}}{\ell_{new}}
+$$
+
+这里的 $m,\ell,u$ 只保存每个 query 行块所需的统计量；因此显存/IO 访问显著减少，但标准全注意力的 $O(S_qS_kd_k)$ 计算量并没有消失。
+
 #### 核心机制
 
 1. **分块计算（Tiling）**：将 $Q,K,V$ 按序列和头维度分块，只把当前需要的 tile 放入片上 SRAM。
@@ -524,18 +433,38 @@ FlashAttention 是注意力层的 **IO-aware kernel/算法优化**，不是一�
 | FlashAttention-3 | 面向 Hopper 的异步流水线和硬件利用率优化；官方实现包含 FP16/BF16 前向与反向、FP8 前向 | H100/H800；beta/实验性组件 |
 | FlashAttention-4 | 基于 CuTeDSL 的新实现，面向 Hopper 与 Blackwell | H100、B200 等；具体支持随版本和 CUDA 环境变化 |
 
-FlashAttention-3/4 的支持范围、安装方式和性能会随 CUDA、GPU 架构、数据类型及 kernel 后端变化，不能只按版本号判断实际速度。
-
-#### 需要避免的表述
-
-1. **不是近似注意力**：FlashAttention 不使用低秩近似或稀疏近似，但不同 kernel 的浮点舍入结果可能存在微小差异。
-2. **不是无限长上下文方案**：它主要节省 IO 和显存，实际上下文长度仍受模型、KV cache、硬件和服务端调度限制。
-3. **不等于 KV cache 管理**：FlashAttention 优化单次注意力计算；KV cache 分页、复用、调度属于推理运行时的职责。
-
-### LLM 推理部署优化：vLLM 与 SGLang
+### 推理部署优化
 
 FlashAttention 解决的是“一个注意力算子如何算得更快”，而 vLLM、SGLang 解决的是“很多请求如何共同运行得更高效”。两者通常会调用 FlashAttention、FlashInfer、Triton 或其他硬件后端，因此不是互相替代关系。
 
+
+#### PagedAttention：分页 KV Cache 的数学形式
+
+PagedAttention 不是新的注意力函数，也不只是调度器；它改变的是 **KV cache 的物理存储和访问方式**，而注意力结果仍等价于标准 attention。
+
+设一个请求的逻辑 KV 序列长度为 $L$，分页大小为 $B_{page}$，则逻辑位置 $t$ 映射到：
+
+$$
+block(t)=\left\lfloor\frac{t}{B_{page}}\right\rfloor,\qquad offset(t)=t\bmod B_{page}
+$$
+
+若物理 KV cache 按 `[N_{blocks},B_{page},H,d_k]` 和 `[N_{blocks},B_{page},H,d_v]` 存储，则 `block_table` 的形状可理解为 `[R,\lceil L_r/B_{page}\rceil]`，其中 $R$ 是请求数。
+
+
+$$
+K_{t,h,:}=K_{cache}[\operatorname{block\_table}[r,block(t)],offset(t),h,:],\qquad
+V_{t,h,:}=V_{cache}[\operatorname{block\_table}[r,block(t)],offset(t),h,:]
+$$
+
+因此，第 $r$ 个请求、第 $h$ 个头的输出仍为：
+
+$$
+o_{r,h}=\sum_{t=0}^{L_r-1}\operatorname{softmax}_t\left(\frac{q_{r,h}k_{r,t,h,:}^{\top}}{\sqrt{d_k}}\right)v_{r,t,h,:}
+$$
+
+变化在于：逻辑上连续的 KV 序列可以分散存放在不连续的物理 block 中，`block_table` 负责地址映射。这样可以减少显存碎片、支持动态 batch，并便于复用和回收 KV block；它不会把 attention 的核心点积计算从二次复杂度变成线性。
+
+可以把三类优化区分为：FlashAttention 是注意力算子的 IO/kernel 优化；PagedAttention 是 KV cache 的分页存储与地址映射；Continuous Batching、Chunked Prefill 等才主要属于请求级调度优化。上面的 PagedAttention 公式是概念级索引表达，具体 block 布局和 kernel 实现会随框架版本变化。
 #### vLLM：通用高吞吐推理运行时
 
 vLLM 的核心优化包括：
@@ -558,18 +487,6 @@ SGLang 的代表性优化包括：
 - **Speculative Decoding、Paged Attention 和多维并行**：支持投机解码，以及 tensor/pipeline/data/expert parallelism。
 - **HiCache**：在 GPU 显存、主机内存和外部存储之间构建分层 KV cache，扩展长上下文和跨请求缓存能力。
 - **量化、多 LoRA 与 kernel 后端**：支持多种量化和多 LoRA batching，并可使用 FlashInfer、FlashAttention、Triton 等后端；具体能力取决于版本、硬件和模型架构。
-
-#### 三者关系
-
-```text
-FlashAttention / FlashInfer / Triton
-        ↓  注意力与矩阵计算 kernel
-vLLM / SGLang
-        ↓  KV cache、调度、批处理、并行、量化、服务 API
-线上推理服务
-```
-
-简单区分：单算子性能看 kernel；高并发吞吐看 batching 与 KV cache 管理；长上下文和多轮复用重点看 prefix cache/HiCache；大规模集群还要考虑并行策略和 prefill-decode 分离。
 
 ## 注意力变体
 
