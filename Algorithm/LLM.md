@@ -74,11 +74,11 @@ $$
 - **缩放点积**​：除以 $\sqrt{d_k}$ 防止点积结果过大导致 Softmax 梯度饱和。
 - **多头注意力**​：将 Q、K、V 投影到多个子空间，并行执行注意力计算后再融合。这使得模型能从**不同表示子空间**联合关注信息，例如同时关注语法结构和语义关系，增强模型表达能力。
 
-1. **位置编码**: 由于自注意力机制本身不包含顺序信息，Transformer 需要通过**位置编码**显式注入序列的顺序。
+3. **位置编码**: 由于自注意力机制本身不包含顺序信息，Transformer 需要通过**位置编码**显式注入序列的顺序。
 
    - 常用正弦余弦函数生成。
    - 这种编码让模型能够学习到**相对位置信息**，例如能够理解“word1 在 word2 之前”这样的关系。
-3. **残差连接与层归一化**: 每个子层（自注意力层、前馈网络）都采用 **残差连接** 和 **层归一化**，即 `Output = LayerNorm(x + Sublayer(x))`。
+4. **残差连接与层归一化**: 每个子层（自注意力层、前馈网络）都采用 **残差连接** 和 **层归一化**，即 `Output = LayerNorm(x + Sublayer(x))`。
 
    - **残差连接**​：将子层输入直接绕过该层加到输出上，确保梯度能有效反向传播，极大缓解了深层网络的梯度消失问题。
    - **层归一化**​：对每个样本的所有特征维度进行归一化，稳定训练过程，加速收敛。
@@ -110,7 +110,7 @@ Transformer 的 Encoder 是一个功能强大的组件，其核心任务是将�
 
 ### 二、分步详解与公式
 
-我们逐步拆解数据在 Encoder 中的流动过程。设序列长度为 $S=seq\_len$，模型维度为 $D=d\_model$。不考虑 batch 时，隐藏状态形状为 `[S,D]`；带 batch 时为 `[B,S,D]`。
+我们逐步拆解数据在 Encoder 中的流动过程。设序列长度为 $S=seq_len$，模型维度为 $D=d_model$。不考虑 batch 时，隐藏状态形状为 `[S,D]`；带 batch 时为 `[B,S,D]`。
 
 #### 步骤 1：输入嵌入与位置编码
 
@@ -136,14 +136,14 @@ Transformer 的 Encoder 是一个功能强大的组件，其核心任务是将�
 1. **查询、键、值投影**​： 对于每个注意力头，将输入 $H_l$ 线性投影到三个不同的空间。
 
    -  $Q_i=H_lW_{Q_i},K_i=H_lW_{K_i},V_i=H_lW_{V_i}$
-   - 单个头的权重形状：$W_{Q_i},W_{K_i}\in[D,d_k]$，$W_{V_i}\in[D,d_v]$；通常 $d_k=d_v=D/H$。
+   - 单个头的权重形状： $W_{Q_i},W_{K_i}\in[D,d_k]$，$W_{V_i}\in[D,d_v]$ ；通常 $d_k=d_v=D/H$。
    - 维度： `[seq_len, d_k]`(通常 `d_k = d_v = d_model / num_heads`)
    - 单个头的 $Q_i,K_i,V_i$ 形状分别为 `[S,d_k]`、`[S,d_k]`、`[S,d_v]`；所有头合并后为 `[B,H,S,d_k]`、`[B,H,S,d_k]`、`[B,H,S,d_v]`。
 2. **缩放点积注意力**​： 计算每个头内部的注意力。
 
 $$ Attention(Q,K,V)=softmax(\frac{QK^T}{\sqrt{d_k}})V $$
 
-单个头中，$QK^T$ 的形状为 `[S,S]`，Softmax 权重仍为 `[S,S]`，乘以 $V$ 后输出为 `[S,d_v]`；批量多头形式分别为 `[B,H,S,S]` 和 `[B,H,S,d_v]`。
+单个头中， $QK^T$ 的形状为 `[S,S]`，Softmax 权重仍为 `[S,S]`，乘以 $V$ 后输出为 `[S,d_v]`；批量多头形式分别为 `[B,H,S,S]` 和 `[B,H,S,d_v]`。
 
    - 公式解释：
      - $QK^T$： 计算每个词元作为“查询”时，与所有词元作为“键”的相似度得分矩阵。
@@ -188,9 +188,7 @@ $$ Attention(Q,K,V)=softmax(\frac{QK^T}{\sqrt{d_k}})V $$
 
 ## Decoder
 
-Decoder 的核心任务是：​**以自回归的方式生成输出序列**。所谓"自回归"，是指在生成每个词时，只能看到已经生成的词（以及完整的输入序列信息），然后预测下一个词。
-
-Decoder 的设计目标：
+Decoder 的核心任务是：​**以自回归的方式生成输出序列**。所谓"自回归"，是指在生成每个词时，只能看到已经生成的词（以及完整的输入序列信息），然后预测下一个词。Decoder 的设计目标：
 
 - **防止信息泄露**​：在训练时，要确保模型在预测位置 `t` 的词时，无法看到 `t` 时刻及之后的答案。
 - **利用编码器信息**​：在生成每个词时，都能参考完整的输入序列信息。
@@ -238,7 +236,10 @@ $$
 2. 其中掩码矩阵 M 定义为：
 
 $$
-M_{ij}=0,(i≥j,允许关注当前和之前的位置)\\
+M_{ij}=0,(i≥j,允许关注当前和之前的位置)
+$$
+
+$$
 M_{ij}=−∞,(i<j,禁止关注未来的位置)
 $$
 
@@ -253,8 +254,8 @@ $$
 这是 Decoder 的**第二个关键区别**，也是连接编码器与解码器的桥梁。
 
 1. **注意力来源**​：
-   - **Query (Q)**​：来自掩码自注意力的输出 $Z_1^l$（代表已生成的部分）
-   - **Key (K) 和 Value (V)**​：来自编码器的最终输出 $H_{enc}^N$（代表完整的输入序列）
+   - Query (Q)​：来自掩码自注意力的输出 $Z_1^l$（代表已生成的部分）
+   - Key (K) 和 Value (V)​：来自编码器的最终输出 $H_{enc}^N$（代表完整的输入序列）
 
 $$
 CrossAttention(Q,K,V)=softmax(\frac{Q_{dec}K_{enc}^T}{\sqrt{d_k}})V_{enc}
@@ -292,7 +293,8 @@ $Z_2^l$ 形状为 `[T,D]`；FFN 中 $W_1\in[D,d_{ff}]$，中间激活为 `[T,d_{
 $$
 P(y_t∣y_{<t},X)=softmax(H_{dec}^NW_{vocab}+b_{vocab})
 $$
-$H_{dec}^N$ 形状为 `[T,D]`，词表投影 $W_{vocab}$ 形状为 `[D,V]`，$b_{vocab}$ 形状为 `[V]`，logits 和概率分布形状为 `[T,V]`（带 batch 时为 `[B,T,V]`）。
+
+$H_{dec}^N$ 形状为 `[T,D]`，词表投影 $W_{vocab}$ 形状为 `[D,V]`， $b_{vocab}$ 形状为 `[V]`，logits 和概率分布形状为 `[T,V]`（带 batch 时为 `[B,T,V]`）。
 
 
 
@@ -321,35 +323,108 @@ $$
 - **应用场景**​：处理长文本序列（如文档翻译），其中序列长度 n=1000 时，标准注意力需计算 100 万次点积，而线性注意力仅需线性次计算。
 - **效果**​：在保持 90% 以上性能的同时，计算量减少约 75%（如 DeepSeek 模型仅用 1/4 算力达到相近效果）。
 
+### Gated DeltaNet（GDN）
+
+[Gated DeltaNet](https://arxiv.org/abs/2412.06464) 是 DeltaNet 的门控[版本](https://sustcsonglin.github.io/blog/2024/deltanet-2/)，它把两种能力结合起来：Delta Rule 负责“根据当前键值纠正记忆”，门控机制负责“主动遗忘不重要的旧记忆”。
+
+#### DeltaNet
+设每个头维护固定大小的状态 $S_t\in\mathbb{R}^{d_k\times d_v}$ ，查询、键、值分别为 $q_t\in\mathbb{R}^{d_k}$ 、 $k_t\in\mathbb{R}^{d_k}$ 、 $v_t\in\mathbb{R}^{d_v}$ 。不带门控的 DeltaNet 更新为：
+
+$$
+S_t=(I-\beta_t k_tk_t^\top)S_{t-1}+\beta_t k_tv_t^\top
+$$
+
+它也可以写成误差修正形式：
+
+$$
+S_t=S_{t-1}+\beta_t k_t\left(v_t-S_{t-1}^\top k_t\right)^\top
+$$
+
+其中 $S_{t-1}^\top k_t$ 是当前状态根据键 $k_t$ 读出的旧值，$v_t-S_{t-1}^\top k_t$ 是预测误差；因此 Delta Rule 不是简单地把 $k_tv_t^\top$ 永久累加，而是先擦除当前键对应的旧关联，再写入新的值。Delta Rule 可以先理解成一个**在线键值记忆更新规则**。
+
+1. **当前 token 产生三个向量**：由当前隐藏状态 $x_t$ 经过投影得到 $q_t,k_t,v_t$。
+2. **先读取旧状态的预测**：在写入当前 token 之前，状态对当前 Key 的已有记忆是
+
+$$
+\hat v_t=S_{t-1}^\top k_t
+$$
+
+3. **计算 Delta 误差**：
+
+$$
+e_t=v_t-\hat v_t=v_t-S_{t-1}^\top k_t
+$$
+
+4. **用一个秩矩阵写回状态**：
+
+$$
+S_t=S_{t-1}+\beta_t k_t e_t^\top
+$$
+
+$$
+S_t=(I-\beta_t k_tk_t^\top)S_{t-1}+\beta_t k_tv_t^\top
+$$
+
+5. **用当前 Query 读取输出**：状态更新后，再用 $q_t$ 读取当前位置的上下文表示：
+
+$$
+o_t=S_t^\top q_t\in\mathbb{R}^{d_v}
+$$
+
+这就是当前 token 的 attention-like 输出。它不是把所有历史 token 的 Value 显式加权求和，而是先把历史压缩进 $S_t$，再用 Query 从这张压缩的 Key-Value 记忆中取值。对于一段新序列，通常每一层、每个注意力头都从零状态开始：
+
+$$
+S_0^{(l,h)}=0\in\mathbb{R}^{d_k\times d_v}
+$$
+
+如果是增量解码，输入并不是一段全新的序列，那么 $S_0$ 应理解为“当前前缀结束时保存的状态”：处理完前缀 $x_{1:T}$ 后保存 $S_T$，下一个 token 从这个 $S_T$ 继续递推。
+
+$$
+\tilde{o}_t=\mathrm{Concat}(o_{t,1},\ldots,o_{t,H})W_O\in\mathbb{R}^{d_{model}}
+$$
+
+然后它才会进入当前层的残差、归一化和 FFN。以常见的 Post-LN 写法为例：
+
+$$
+z_t=\mathrm{LayerNorm}(x_t+\tilde{o}_t),\qquad x_t^{next}=\mathrm{LayerNorm}(z_t+\mathrm{FFN}(z_t))
+$$
+
+$x_t^{next}$ 才是这一层输出、也是下一层接收的 hidden state。Gated DeltaNet 中 $\alpha_t$ 和 $\beta_t$ 都是标量：$\alpha_t,\beta_t\in\mathbb{R}$，通常经过 Sigmoid 约束到 $(0,1)$。Gated DeltaNet 在状态衰减上加入数据相关的门 $\alpha_t$ ：
+
+$$
+S_t=\alpha_t(I-\beta_t k_tk_t^\top)S_{t-1}+\beta_t k_tv_t^\top,\qquad o_t=S_t^\top q_t
+$$
+
+- **$\alpha_t$ 的作用**：按头共享的标量衰减门，控制旧状态整体保留多少；当需要快速切换主题或记忆新模式时，可以主动遗忘旧信息。
+- **$\beta_t$ 的作用**：按头共享的标量写入步长，决定本次误差修正写入多少。
+
+#### Gated DeltaNet-2：解耦擦除与写入
+
+这里需要区分两层含义：Gated DeltaNet 和 KDA 中，$\alpha_t$ 与 $\beta_t$ 已经分别承担“衰减旧状态”和“执行 Delta 更新”的职责，并不是两个作用都由同一个门完成；但在 Delta Rule 内部，同一个 $\beta_t$ 同时出现在擦除项 $(I-\beta_t k_tk_t^\top)$ 和写入项 $+\beta_t k_tv_t^\top$ 中，因此内容相关的擦除与写入仍然被 $\beta_t$ 绑定。Gated DeltaNet-2 进一步将这两个动作拆成独立的 **erase gate** 和 **write gate**，使模型可以“强擦除但少写入”，或“保留旧记忆但谨慎写入”。
+
 ### Kimi Delta Attention（KDA）
 
 [Kimi Delta Attention（KDA）](https://arxiv.org/abs/2510.26692) 是 Kimi Linear 提出的线性注意力变体，也是 Kimi K3 的核心序列混合算子之一。它在 Gated DeltaNet 的 delta rule 上，把按头共享的遗忘门细化为**按通道独立的衰减率**，以更精确地管理有限大小的循环记忆状态。
 
-设每个头维护状态 $S_t \in \mathbb{R}^{d_k \times d_v}$，$\alpha_t$ 是通道级遗忘门，$\beta_t$ 是写入步长，则其递推可写为：
+设每个头维护状态 $S_t \in \mathbb{R}^{d_k \times d_v}$。KDA 中 $\alpha_t\in(0,1)^{d_k}$ 是通道级遗忘向量，因此 $\mathrm{Diag}(\alpha_t)\in\mathbb{R}^{d_k\times d_k}$；$\beta_t\in(0,1)$ 通常仍是按头、按 token 的标量写入步长，则其递推可写为：
 
 $$
-S_t = (I - \beta_t k_t k_t^\top) Diag(\alpha_t)S_{t-1} + \beta_t k_t v_t^\top,
+S_t = (I - \beta_t k_t k_t^\top)\mathrm{Diag}(\alpha_t)S_{t-1} + \beta_t k_t v_t^\top,
 \qquad o_t = S_t^\top q_t
 $$
 
 - **线性解码状态**：KDA 保存固定大小的 $S_t$，而不是随上下文线性增长的 KV cache；因此自回归解码的状态内存不随序列长度增长。
-- **细粒度遗忘**：$\alpha_t$ 逐通道控制旧记忆保留多少，$\beta_t$ 控制新键值关联写入多少；这比每头一个标量遗忘门更灵活。
-- **高效并行**：训练/prefill 时可用分块并行算法，生成时使用递推状态更新；Moonshot 还开源了 [FlashKDA](https://github.com/MoonshotAI/FlashKDA) 内核。
-- **与 MLA 的区别**：MLA 仍是全局 softmax 注意力，只是压缩 KV cache；KDA 则以有限状态的线性递推取代大部分全局注意力。因此二者可互补，而非互相替代。
+- **细粒度遗忘**： $\alpha_t$ 的 $d_k$ 个分量逐通道控制旧记忆保留多少， $\beta_t$ 这个标量控制新键值关联整体写入多少；这比每头一个标量遗忘门更灵活。
+- **高效并行**：训练 prefill 时可用分块并行算法，生成时使用递推状态更新；Moonshot 还开源了 [FlashKDA](https://github.com/MoonshotAI/FlashKDA) 内核。
 - **Kimi K3 的用法**：[Kimi K3](https://github.com/MoonshotAI/Kimi-K3) 的 93 层中包含 69 层 KDA 和 24 层 Gated MLA。这样的混合结构让 KDA 负责大部分高效长程状态传递，而 MLA 周期性提供全局信息交互。
 
 ### 稀疏注意力（Sparse Attention）
 
-稀疏注意力通过**限制每个 token 的注意力范围**，只计算最关键的连接，避免全序列交互。常见方法包括滑动窗口、全局 token 和随机采样：
+稀疏注意力通过**限制每个 token 的注意力范围**，只计算最关键的连接，避免全序列交互。常见方法包括滑动窗口、全局 token 和随机采样，掩码 M 定义哪些位置允许交互：
 
 $$
 SparseAttention(Q,K,V)=softmax(\frac{1}{d_k}QK^T+M)V
 $$
-
-掩码 M 定义哪些位置允许交互：
-
-- Mij=0 允许计算注意力。
-- Mij=−∞ 禁止计算（被忽略）。
 
 主要稀疏模式
 
@@ -393,9 +468,9 @@ $$
 S=\frac{QK^\top}{\sqrt{d_k}},\qquad P=\mathrm{softmax}(S),\qquad O=PV
 $$
 
-其中 $Q\in[B,H,S_q,d_k]$，$K\in[B,H,S_k,d_k]$，$V\in[B,H,S_k,d_v]$；$S,P\in[B,H,S_q,S_k]$，$O\in[B,H,S_q,d_v]$。FlashAttention 的关键是**不把完整的 $S$ 或 $P$ 写回 HBM**。
+其中 $Q\in[B,H,S_q,d_k]$， $K\in[B,H,S_k,d_k]$ ， $V\in[B,H,S_k,d_v]$ ； $S,P\in[B,H,S_q,S_k]$ ， $O\in[B,H,S_q,d_v]$ 。FlashAttention 的关键是**不把完整的 $S$ 或 $P$ 写回 HBM**。
 
-将 $Q$、$K$、$V$ 切成 tile 后，对某一行块维护 running max $m$、归一化因子 $\ell$ 和未归一化输出 $u$。处理新的分数块 $S_{ij}$ 时，可用 online Softmax 更新：
+将 $Q$、 $K$ 、 $V$ 切成 tile 后，对某一行块维护 running max $m$、归一化因子 $\ell$ 和未归一化输出 $u$。处理新的分数块 $S_{ij}$ 时，可用 online Softmax 更新：
 
 $$
 m_{new}=\max(m_{old},\mathrm{rowmax}(S_{ij}))
@@ -480,6 +555,30 @@ SGLang 的代表性优化包括：
 - **Speculative Decoding、Paged Attention 和多维并行**：支持投机解码，以及 tensor/pipeline/data/expert parallelism。
 - **HiCache**：在 GPU 显存、主机内存和外部存储之间构建分层 KV cache，扩展长上下文和跨请求缓存能力。
 - **量化、多 LoRA 与 kernel 后端**：支持多种量化和多 LoRA batching，并可使用 FlashInfer、FlashAttention、Triton 等后端；具体能力取决于版本、硬件和模型架构。
+
+### 进一步的长上下文与缓存优化
+
+前面的线性注意力、稀疏注意力和状态递推主要改变了注意力的计算方式；下面几类方法则主要解决长上下文训练或推理时的系统瓶颈。
+
+#### Ring Attention 与 Context Parallelism
+
+Ring Attention 将序列切分到多个设备，每个设备保留自己的 Query 块，并让 Key/Value 块在设备环中流动；设备在通信的同时计算当前块的注意力。它仍然可以计算精确注意力，核心收益是把超长序列的显存和计算分摊到多张卡，而不是改变注意力函数。
+
+#### KV Cache 量化与压缩
+
+KV Cache 量化用较低比特数保存历史 Key/Value，以减少显存和带宽。一个简单的对称量化可写为：
+
+$$
+\hat{x}=s\cdot\mathrm{clip}\left(\mathrm{round}\left(\frac{x}{s}\right),-q_{max},q_{max}\right)
+$$
+
+其中 $s$ 是缩放因子，$q_{max}$ 由量化位宽决定。实际方法会在 per-channel、per-token、per-group 等粒度之间权衡；例如 KIVI 研究了 Key 按通道、Value 按 token 的非对称量化。量化会引入误差，因此需要关注长上下文检索、困惑度和下游任务质量。
+
+#### Attention Sink 与 StreamingLLM
+
+一些模型会把最开始的少量 token 作为 attention sink，即使它们语义信息不强，也会吸收较大的注意力权重。StreamingLLM 的典型策略是保留少量初始 sink token，再保留最近窗口的 KV，而不是只保留最近 token；它解决的是有限 KV Cache 下的流式生成稳定性问题。
+
+这三类方法与 PagedAttention 的分工不同：Ring Attention 解决跨设备长序列计算，KV Cache 量化/压缩解决缓存容量，Attention Sink 解决缓存裁剪后的质量保持；PagedAttention 解决的是 KV block 的物理内存管理。
 
 ## 注意力变体
 
