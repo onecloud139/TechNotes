@@ -1266,6 +1266,23 @@ $$
 - **应用场景**​：处理长文本序列（如文档翻译），其中序列长度 n=1000 时，标准注意力需计算 100 万次点积，而线性注意力仅需线性次计算。
 - **效果**​：在保持 90% 以上性能的同时，计算量减少约 75%（如 DeepSeek 模型仅用 1/4 算力达到相近效果）。
 
+#### Kimi Delta Attention（KDA）
+
+[Kimi Delta Attention（KDA）](https://arxiv.org/abs/2510.26692) 是 Kimi Linear 提出的线性注意力变体，也是 Kimi K3 的核心序列混合算子之一。它在 Gated DeltaNet 的 delta rule 上，把按头共享的遗忘门细化为**按通道独立的衰减率**，以更精确地管理有限大小的循环记忆状态。
+
+设每个头维护状态 $S_t \in \mathbb{R}^{d_k \times d_v}$，$\alpha_t$ 是通道级遗忘门，$\beta_t$ 是写入步长，则其递推可写为：
+
+$$
+S_t = (I - \beta_t k_t k_t^\top)\operatorname{Diag}(\alpha_t)S_{t-1} + \beta_t k_t v_t^\top,
+\qquad o_t = S_t^\top q_t
+$$
+
+- **线性解码状态**：KDA 保存固定大小的 $S_t$，而不是随上下文线性增长的 KV cache；因此自回归解码的状态内存不随序列长度增长。
+- **细粒度遗忘**：$\alpha_t$ 逐通道控制旧记忆保留多少，$\beta_t$ 控制新键值关联写入多少；这比每头一个标量遗忘门更灵活。
+- **高效并行**：训练/prefill 时可用分块并行算法，生成时使用递推状态更新；Moonshot 还开源了 [FlashKDA](https://github.com/MoonshotAI/FlashKDA) 内核。
+- **与 MLA 的区别**：MLA 仍是全局 softmax 注意力，只是压缩 KV cache；KDA 则以有限状态的线性递推取代大部分全局注意力。因此二者可互补，而非互相替代。
+- **Kimi K3 的用法**：[Kimi K3](https://github.com/MoonshotAI/Kimi-K3) 的 93 层中包含 69 层 KDA 和 24 层 Gated MLA。这样的混合结构让 KDA 负责大部分高效长程状态传递，而 MLA 周期性提供全局信息交互。
+
 #### 稀疏注意力（Sparse Attention）
 
 稀疏注意力通过**限制每个 token 的注意力范围**，只计算最关键的连接，避免全序列交互。常见方法包括滑动窗口、全局 token 和随机采样.稀疏注意力没有统一公式，而是通过**掩码矩阵** M 实现：
@@ -1315,48 +1332,59 @@ $$
 
 ### 注意力变体
 
-#### MHA(多头注意力，Multi-Head Attention)
+这一节按“信息如何连接”和“KV 缓存如何存储”两条线分类。线性注意力、稀疏注意力和 FlashAttention 分别见上一节和后文；它们主要改变复杂度或实现，而不等同于下面的头部/KV 架构变体。
 
-将输入映射到**多个子空间**并行计算注意力，捕捉不同维度的依赖关系，最后融合结果提升模型表达能力。
+#### 因果自注意力与交叉注意力
 
-$$
-\text{MultiHead}(Q, K, V) = \text{Concat}(\text{head}_1, \text{head}_2, \dots, \text{head}_h)W^O
-$$
+- **双向自注意力（bidirectional self-attention）**：每个 token 都能关注整个输入序列，常用于 Encoder，例如 BERT。
+- **因果自注意力（causal / masked self-attention）**：通过上三角掩码禁止关注未来 token，是 Decoder-Only 语言模型生成时的基本形式。
+- **交叉注意力（cross-attention）**：$Q$ 来自当前序列，$K,V$ 来自另一序列或模态；常用于 Encoder-Decoder 翻译和图文多模态融合。
 
-$$
-\text{head}_i = \text{Attention}(QW_i^Q, KW_i^K, VW_i^V)
-$$
+#### MHA（多头注意力，Multi-Head Attention）
 
-#### MQA(多查询注意力，Multi-Query Attention)
-
-所有查询头**共享同一组 KV 投影**，大幅降低 KV 缓存大小与计算开销，牺牲少量表达能力换取推理速度提升。
+MHA 为每个头分别学习 $Q,K,V$ 投影，在多个表示子空间并行建模依赖关系，再拼接输出。
 
 $$
-\text{MultiQueryHead}_i = \text{Attention}(QW_i^Q, KW^K, VW^V) \quad \forall i=1..h
+\text{MultiHead}(Q,K,V) = \text{Concat}(\text{head}_1,\ldots,\text{head}_h)W^O
 $$
 
 $$
-\text{MultiQuery}(Q, K, V) = \text{Concat}(\text{head}_1, \dots, \text{head}_h)W^O
+\text{head}_i = \text{Attention}(QW_i^Q,KW_i^K,VW_i^V)
 $$
 
-- **核心差异**：所有头共享$W^K\in\mathbb{R}^{d_{\text{model}}\times d_k}$$W^V\in\mathbb{R}^{d_{\text{model}}\times d_v}$，仅 Q 头保持独立
-- **维度变化**：KV 维度固定为$d_k$，与头数 h 无关
+#### MQA（多查询注意力，Multi-Query Attention）
 
-#### GQA(分组查询注意力，Grouped Query Attention)
-
-查询头**分组**，每组共享一组 KV 投影，平衡 MHA 的表达能力与 MQA 的效率优势，是 LLaMA-2、GPT-4 等的默认选择。
-
-设总查询头数$h_q$，分组数$G$，每组查询头数$g = h_q/G$，KV 头数$h_{kv}=G$：
+MQA 保留多个独立的查询头，但让所有头共享一组 Key 和 Value 投影：
 
 $$
-\text{GroupHead}_{g,i} = \text{Attention}(QW_{g,i}^Q, KW_g^K, VW_g^V) \quad \forall i=1..g
+\text{head}_i = \text{Attention}(QW_i^Q,KW^K,VW^V), \quad i=1,\ldots,h
 $$
 
+- **收益**：KV cache 从 $h$ 组降至 1 组，显著降低增量解码的内存带宽需求。
+- **权衡**：共享 KV 形成更强的信息瓶颈，质量或训练稳定性可能略逊于 MHA。
+
+#### GQA（分组查询注意力，Grouped-Query Attention）
+
+GQA 是 MHA 与 MQA 之间的折中。设查询头数为 $h_q$、KV 头数为 $h_{kv}$，其中 $1 < h_{kv} < h_q$；每个 KV 头服务 $h_q / h_{kv}$ 个查询头。
+
 $$
-\text{GroupedQuery}(Q,K,V) = \text{Concat}(\text{Group}_1, \dots, \text{Group}_G)W^O
+\text{head}_{g,i} = \text{Attention}(QW_{g,i}^Q,KW_g^K,VW_g^V)
 $$
 
-其中每组内的 g 个查询头共享同一组$W_g^K, W_g^V$，仅 Q 头独立。
+- **收益**：KV cache 大小约为 MHA 的 $h_{kv}/h_q$，质量通常接近 MHA。
+- **应用**：已成为现代 Decoder-Only 模型常见的推理效率设计。
+
+#### MLA（多头潜在注意力，Multi-Head Latent Attention）
+
+MLA 由 DeepSeek-V2 提出。它不直接缓存每个头的 $K,V$，而是先把 KV 信息压缩到低维潜变量 $c_t^{KV}$；推理时缓存该潜变量并按需要恢复注意力所需表示。
+
+$$
+c_t^{KV} = x_t W^{DKV}, \qquad [K_t;V_t] \approx c_t^{KV} W^{UKV}
+$$
+
+- **收益**：在保留多头表达能力的同时大幅压缩 KV cache，尤其适合长上下文和高并发解码。
+- **实现要点**：MLA 与 RoPE 的位置分量需分开处理，工程实现通常会通过矩阵吸收（matrix absorption）减少显式恢复开销。
+- **权衡**：训练和推理内核更复杂；它优化的是缓存与带宽，不会消除标准注意力随序列长度增长的二次计算。
 
 ### 位置编码
 
@@ -1825,144 +1853,75 @@ Transformer 选择 LN 而非 BN，主要基于以下几点关键原因：
 4. **缩放的作用**​：通过将点积结果除以 $\sqrt{d_k}$，我们将点积的方差重新缩放为 1。
 5. 这样做的结果是，​**Softmax 函数的输入值被控制在一个更合适的范围内**，从而避免了函数进入梯度饱和区，确保了训练过程中有足够大的梯度流，使模型能够更有效地学习。
 
-### **优化器（Optimizer）**
+### 优化器（Optimizer）
+
+优化器根据损失函数的梯度更新参数：
 
 $$
-\theta = \theta - \eta \cdot \nabla L(\theta)
+\theta_{t+1} = \theta_t - \eta \cdot \nabla L(\theta_t)
 $$
 
-基础 SGD 的最大问题是**梯度震荡、收敛慢**，动量类优化器通过引入「惯性」概念，解决这一问题。
+这里的关键差异在于：是否累积历史梯度、是否按参数自适应缩放，以及是否利用矩阵参数的几何结构。
 
-1. **动量法（Momentum）**
+#### SGD、Momentum 与 NAG
 
-   - **核心思想**：模拟物理中的「动量」，参数更新不仅考虑当前梯度，还累加历史梯度的加权和。
-   - **参数更新逻辑**：
-
-     1. 计算梯度的累积动量：（动量系数，通常取 0.9）
+- **SGD**：直接沿当前梯度方向更新，简单但在狭长损失谷中容易震荡。
+- **Momentum**：累积梯度的一阶动量，在方向一致时加速、在来回震荡时平滑更新。
 
 $$
-v_t = \gamma \cdot v_{t-1} + \nabla L(\theta_t)
+v_t = \gamma v_{t-1} + \nabla L(\theta_t), \qquad \theta_{t+1} = \theta_t - \eta v_t
 $$
 
-```
-  2.  更新参数：$\theta_{t+1} = \theta_t - \eta \cdot v_t$
+- **NAG（Nesterov Accelerated Gradient）**：先按历史动量“预走一步”，再在预估位置计算梯度；通常比普通 Momentum 更早修正方向。
 
-- **优点**：
+#### 自适应学习率：Adagrad、RMSprop、Adam 与 AdamW
 
-  - 加速收敛：在梯度方向一致的区域，动量会不断累积，参数更新速度加快。
-
-  - 抑制震荡：在梯度方向频繁变化的区域，动量会抵消部分波动，让更新路径更平滑。
-
-- **缺点**：动量系数 \gamma 需要调参；无法自适应调整不同参数的学习率。
-```
-
-1. **Nesterov 加速梯度（Nesterov Accelerated Gradient, NAG）**
-
-   - **核心思想**：对 Momentum 的改进，先根据历史动量「预判」参数的下一步位置，再计算该位置的梯度。
-
-动量类优化器的学习率 $\eta$ 是**全局固定**的，而实际中不同参数的梯度大小差异很大（比如稀疏特征对应的参数梯度小）。自适应学习率优化器会根据**每个参数的梯度历史**，为其分配不同的学习率。
-
-1. **Adagrad**
-
-   - **核心思想**：对梯度大的参数，减小学习率；对梯度小的参数，增大学习率。
-   - **参数更新逻辑**：
+- **Adagrad**：按参数累计梯度平方，为稀疏特征提供较大的相对学习率；但累计量单调增加，学习率可能过快衰减。
 
 $$
-G_t = G_{t-1} + (\nabla L(\theta_t))^2
+G_t = G_{t-1} + g_t^2, \qquad \theta_{t+1} = \theta_t - \frac{\eta}{\sqrt{G_t} + \epsilon} g_t
+$$
+
+- **RMSprop**：用梯度平方的指数滑动平均取代累计和，避免 Adagrad 的持续衰减。
+
+$$
+v_t = \rho v_{t-1} + (1-\rho)g_t^2, \qquad \theta_{t+1} = \theta_t - \frac{\eta}{\sqrt{v_t} + \epsilon}g_t
+$$
+
+- **Adam**：结合一阶动量和二阶矩的自适应缩放。
+
+$$
+m_t = \beta_1m_{t-1} + (1-\beta_1)g_t, \qquad v_t = \beta_2v_{t-1} + (1-\beta_2)g_t^2
 $$
 
 $$
-\theta_{t+1} = \theta_t - \frac{\eta}{\sqrt{G_t + \epsilon}} \cdot \nabla L(\theta_t)
+\theta_{t+1} = \theta_t - \eta \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon}
 $$
 
-```
-- **优点**：无需手动调参学习率；适合**稀疏数据**（如自然语言处理中的词嵌入）。
-
-- **缺点**：G_t会不断累加，导致学习率持续衰减，最终趋近于0，模型提前停止收敛。
-```
-
-1. **Adadelta**
-
-   - **核心思想**：解决 Adagrad 学习率衰减过快的问题，用**梯度平方的滑动平均**代替累积和。
+- **AdamW**：将权重衰减与 Adam 的自适应更新解耦，是训练 Transformer 的常用基线。
 
 $$
-E[g^2]_t = \rho \cdot E[g^2]_{t-1} + (1-\rho) \cdot (\nabla L(\theta_t))^2
+\theta_{t+1} = (1-\eta\lambda)\theta_t - \eta \frac{\hat{m}_t}{\sqrt{\hat{v}_t} + \epsilon}
 $$
 
-$$
-E[\Delta\theta^2]_t = \rho \cdot E[\Delta\theta^2]_{t-1} + (1-\rho) \cdot (\Delta\theta_{t-1})^2
-$$
+#### Muon：对矩阵更新做正交化
+
+[Muon](https://github.com/KellerJordan/Muon)（2024）是面向神经网络**隐藏层二维权重矩阵**的优化器。它先计算带动量的更新，再近似取其极分解（polar decomposition）中的正交因子，使更新的奇异值更均衡，而不是像 AdamW 那样逐元素缩放。
+
+对于矩阵参数 $W$，可以把其核心过程概括为：
 
 $$
-\Delta\theta_t = -\frac{\sqrt{E[\Delta\theta^2]_{t-1}} + \epsilon}{\sqrt{E[g^2]_t} + \epsilon} \cdot g_t
+B_t = \mu B_{t-1} + (1-\mu)\nabla_W L, \qquad \Delta W_t = \operatorname{Orthogonalize}(B_t)
 $$
 
 $$
-\theta_{t+1} = \theta_t + \Delta\theta_t
+W_{t+1} = W_t - \eta \Delta W_t
 $$
 
-```
-- **优点**：无需手动设置学习率；避免了学习率衰减到0的问题；收敛稳定。
-
-- **缺点**：在某些任务中收敛速度不如后续的RMSprop和Adam。
-```
-
-1. **RMSprop**
-
-   - **核心思想**：由 Hinton 提出，和 Adadelta 思路类似，同样用梯度平方的滑动平均代替累积和，形式更简洁。
-   - **参数更新逻辑**：
-
-     1. 梯度平方滑动平均：$E[g^2]_t = \gamma \cdot E[g^2]_{t-1} + (1-\gamma) \cdot (\nabla L(\theta_t))^2$
-
-$$
-\theta_{t+1} = \theta_t - \frac{\eta}{\sqrt{E[g^2]_t + \epsilon}} \cdot \nabla L(\theta_t)
-$$
-
-```
-- **优点**：收敛速度快，稳定性强；适合处理非平稳目标函数（如深度学习的复杂损失）。
-
-- **适用场景**：计算机视觉、语音识别等复杂任务。
-```
-
-1. **Adam（Adaptive Moment Estimation）**
-
-   - **核心思想**：**结合了 Momentum 的「动量」和 RMSprop 的「自适应学习率」**，是目前最主流的优化器。
-
-$$
-m_t = \beta_1 \cdot m_{t-1} + (1-\beta_1) \cdot \nabla L(\theta_t)
-$$
-
-$$
-v_t = \beta_2 \cdot v_{t-1} + (1-\beta_2) \cdot (\nabla L(\theta_t))^2
-$$
-
-$\hat{m}_t = \frac{m_t}{1-\beta_1^t}$     $\hat{v}_t = \frac{v_t}{1-\beta_2^t}$
-
-$$
-\theta_{t+1} = \theta_t - \frac{\eta}{\sqrt{\hat{v_t}} + \epsilon} \cdot \hat{m_t}
-$$
-
-```
-- **优点**：收敛速度快、稳定性高；对学习率的鲁棒性强；几乎适用于所有深度学习任务。
-
-- **缺点**：在某些小数据集或需要极致精度的任务中，效果可能不如SGD+动量。
-```
-
-1. **AdamW**
-
-   - **核心思想**：对 Adam 的改进，**解耦权重衰减（Weight Decay）和 L2 正则化**
-
-**权重衰减系数 **$\lambda$$\in 10^{-2} \sim 10^{-5}$。
-
-$$
-\theta_{t+1} = \theta_t - \frac{\eta}{\sqrt{\hat{v}_t}+\epsilon} \cdot \hat{m}_t - \eta \cdot \lambda \cdot \theta_t
-$$
-
-```
-- **优点**：权重衰减的效果更稳定，在大模型训练（如Transformer）中表现更优，能有效防止过拟合。
-
-- **适用场景**：大模型训练、高精度要求的任务。
-```
+- **如何高效实现**：不必执行昂贵的 SVD；实践中通常用固定步数的 Newton--Schulz 迭代近似正交化。
+- **适用参数**：通常用于线性层和卷积层等二维（或可展平为二维）的隐藏权重。
+- **不要一刀切替换 AdamW**：Embedding、输出头、偏置、LayerNorm/RMSNorm 的缩放参数等往往继续使用 AdamW；Muon 的参考实现也采用这种混合参数组。
+- **优势与限制**：它在部分 Transformer 训练实验中展现出很好的数据效率和大批量训练表现，但学习率、权重衰减、分布式正交化开销都需要重新验证；把它视为有前景的训练优化方案，而不是 AdamW 的无条件替代品。
 
 ### 显存与量化
 
@@ -3656,7 +3615,7 @@ $$w_g = \exp\left(-\alpha \cdot \left|\frac{\overline{R}_g^{\text{out}} - \mu_R}
 
 - 特点：优势信号强的组使用更宽裁剪范围，鼓励更大步长更新；反之收紧范围保证稳定
 	1. **计算组混合权重**$w_g^{\text{mix}}$：$w_g^{\text{mix}} = 1\left(\overline{R}_g^{\text{out}} < R_{\text{out}}^{\text{max}}\right) \cdot 1\left(r_g < \varepsilon_{\text{mix}}\right) \cdot r_g
-$
+$$
 		1. 这里$R_{\text{out}}^{\text{max}}$是预先设定好的超参（0.95），如果某一组的结果已经很高，说明不需要额外
 		2.  $r_g = \frac{\hat{\sigma}_g^{\text{mix}}}{\hat{\sigma}_g^{\text{out}} + \hat{\sigma}_g^{\text{mix}} + \varepsilon_{\text{std}}}$：混合奖励标准差占比，如果 $r_g$ 太大（>0.7），说明混合奖励的方差主要来自推理奖励（噪声大），放弃该组的推理奖励融合
 		3. $\varepsilon_{\text{mix}}$：区分度阈值（论文中设为 0.7）
