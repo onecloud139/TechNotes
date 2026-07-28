@@ -44,6 +44,15 @@ AttnRes 是针对深层 PreNorm Transformer 中“残差信号被逐层稀释”
 - **与普通残差的区别**：普通残差主要是 $h_l + f_l(h_l)$ 的相邻层捷径；AttnRes 增加跨层可学习的残差组合。
 - **与 KDA 的分工**：KDA 解决 token 维度的长程状态管理；AttnRes 解决 layer 维度的信号传播。两者互补。
 
+AttnRes 直接处理深度方向的残差路径。普通残差为 $h_l=h_{l-1}+f_{l-1}(h_{l-1})$；AttnRes 改为按当前层选择历史层输出：
+
+$$
+h_l=\alpha_{0\to l}h_1+\sum_{i=1}^{l-1}\alpha_{i\to l}f_i(h_i),\qquad
+\alpha_{i\to l}=\frac{\exp(q_l^\top\operatorname{RMSNorm}(k_i))}{\sum_j\exp(q_l^\top\operatorname{RMSNorm}(k_j))}.
+$$
+
+KDA 管 token 历史，AttnRes 管 layer 路径。
+
 ## 4. Stable LatentMoE：高稀疏度下的专家路由
 
 K3 的 MoE 在每个 token 上只激活 16/896 个路由专家，同时始终经过 2 个共享专家。这样总参数可以扩大到 2.8T，而单 token 的有效计算保持在 104B 级别。
@@ -54,6 +63,15 @@ K3 的 MoE 在每个 token 上只激活 16/896 个路由专家，同时始终经
 - **KDA/MLA 混合**主要降低长上下文的注意力状态与带宽压力。
 
 两者分别优化不同瓶颈，不能把“激活参数少”误解为模型整体不需要大规模通信或内存。
+
+稀疏路由可写为
+
+$$
+\mathcal E_t=\operatorname{TopK}(\operatorname{softmax}(W_rx_t),16),\qquad
+y_t=E_{\rm shared}(x_t)+\sum_{e\in\mathcal E_t}\tilde p_{t,e}E_e(x_t).
+$$
+
+这解释 $16/896$ 的计算稀疏性，并非 Stable LatentMoE 未公开细节的精确复现。
 
 ## 5. 长上下文、原生视觉与部署
 
@@ -76,39 +94,11 @@ K3 的 MoE 在每个 token 上只激活 16/896 个路由专家，同时始终经
 - [Attention Residuals](https://arxiv.org/abs/2603.15031)
 - [FlashKDA 内核](https://github.com/MoonshotAI/FlashKDA)
 
-## 7. 公式化补充：从 KDA 到 AttnRes 的两条记忆轴
 
-KDA 的状态更新
+## 7. 扩展：架构分工与 Agent 系统
 
-$$
-S_t=(I-\beta_tk_tk_t^\top)\operatorname{Diag}(\alpha_t)S_{t-1}
-+\beta_tk_tv_t^\top,\qquad o_t=S_t^\top q_t
-$$
+69 层 KDA 和 24 层 Gated MLA 不是简单的“线性注意力替代全注意力”。KDA 负责在长序列 decode 中以固定状态维持历史，MLA 定期提供全局内容寻址，用来复查被压缩状态难以精确保留的远程关联。因此 K3 的性能不只由 KDA 公式决定，还取决于 MLA 插入频率、MoE 通信和 KV 读取。
 
-可以分成“遗忘—覆盖—读取”三步理解。$\operatorname{Diag}(\alpha_t)$ 先逐通道衰减旧记忆；$I-\beta_tk_tk_t^\top$ 再沿当前 key 的方向修正已有状态，避免同一内容被无界累积；$\beta_tk_tv_t^\top$ 写入当前键值对。由于 $S_t$ 的尺寸与序列长度无关，decode 的记忆容量由状态维度而非上下文长度控制。
+Stable LatentMoE 的 896 专家带来大容量，但训练需要控制负载均衡，服务需要处理路由后的 all-to-all 通信。共享专家承接通用模式，路由专家形成局部专业化；实际吞吐会随 batch、并发和 token 分布改变，不能仅按 104B 激活参数估算。
 
-AttnRes 则作用于深度而不是时间。普通残差为
-
-$$
-h_l=h_{l-1}+f_{l-1}(h_{l-1}),
-$$
-
-而 AttnRes 从历史层输出中选择残差路径：
-
-$$
-h_l=\alpha_{0\to l}h_1+\sum_{i=1}^{l-1}\alpha_{i\to l}f_i(h_i),\qquad
-\alpha_{i\to l}=
-\frac{\exp(q_l^\top\operatorname{RMSNorm}(k_i))}
-{\sum_{j=0}^{l-1}\exp(q_l^\top\operatorname{RMSNorm}(k_j))}.
-$$
-
-这些权重和为 1，因此不是把所有历史层无条件相加，而是根据当前层需要进行凸组合。KDA 处理“该记住哪些历史 token”，AttnRes 处理“该走哪些历史 layer 路径”。
-
-对于 K3 的 $16/896$ 稀疏专家，路由可用下面的通用表达理解：
-
-$$
-\mathcal E_t=\operatorname{TopK}(\operatorname{softmax}(W_rx_t),16),\qquad
-y_t=E_{\rm shared}(x_t)+\sum_{e\in\mathcal E_t}\tilde p_{t,e}E_e(x_t).
-$$
-
-该式解释计算稀疏性，并非 Stable LatentMoE 未公开细节的完整复现。
+1M 窗口也不会自动产生可靠 agent。代码、工具返回、网页证据和已完成子目标应分层保存；尤其应保留上一轮 assistant 的 reasoning/tool-call 结构，而不是只留下最终文本，否则下一轮轨迹会偏离训练时的上下文格式。

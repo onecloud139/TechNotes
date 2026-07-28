@@ -1,4 +1,4 @@
-# Qwen3 / Qwen3.5 深度技术笔记
+# Qwen3 深度技术笔记
 
 ## 1. 架构：从 Dense 到极稀疏 MoE
 
@@ -76,101 +76,11 @@ Cerebras 的 wafer-scale 引擎（CS-3）针对 Qwen3-32B 实现了实时推理�
 
 对于长上下文部署，采用 Dynamic Sparse Attention 技术，在序列长度超过 8K 时自动启用局部注意力（Local Attention）与全局注意力（Global Attention）的混合模式，将计算复杂度从 $O(n^2)$ 降至 $O(n \cdot w)$，其中 $w$ 为局部窗口大小（通常 4K）。配合 vLLM 的 PagedAttention 内存管理，支持单卡部署 128K 上下文模型。
 
-## 7. Qwen3.6：面向真实 Agentic Coding 的增量版本
 
-> 资料状态：Qwen3.6 的官方仓库明确标示用户指南仍在完善中，因此本节仅记录仓库和公开模型卡已披露的内容；完整训练数据配比、后训练细节不能从现有公开材料中推断。
+## 7. 扩展：系列取舍与评测
 
-Qwen3.6 是构建在 Qwen3.5 基础上的更新，重点是真实工程环境中的 agentic coding、仓库级推理和跨轮思考上下文保留，而不是单纯扩大参数量。公开权重包括 27B Dense 与 35B-A3B MoE 两个主要档位，并均采用视觉编码器的因果语言模型形式。
+Qwen3 的 Dense 与 MoE 路线对应不同部署取舍：Dense 的执行路径更固定，延迟和并行策略更可预测；MoE 以较少激活参数换取更大容量，但需要专家路由和跨设备通信。应按目标 batch、并发与硬件拓扑选型，而不能只按总参数比较。
 
-### 7.1 35B-A3B：Gated DeltaNet 与 Gated Attention 的混合
+后训练中的 SFT、推理 RL、强到弱蒸馏与通用 RL 也解决不同问题：SFT 建立指令格式和基础行为，RL 优化可验证或偏好目标，蒸馏将强模型的轨迹转移到小模型。实际评测应同时检查推理正确率、格式遵循、工具调用和多轮一致性，避免单一基准掩盖行为退化。
 
-35B-A3B 共 40 层、总参数 35B、每 token 激活约 3B。其层级布局重复 10 次：
-
-$$
-3 \times (\text{Gated DeltaNet} \rightarrow \text{MoE})
-\quad\rightarrow\quad
-1 \times (\text{Gated Attention} \rightarrow \text{MoE})
-$$
-
-| 组件 | 公开配置 |
-| --- | --- |
-| Gated DeltaNet | 32 个 V 线性注意力头、16 个 QK 头，head dim 128 |
-| Gated Attention | 16 个 Q 头、2 个 KV 头，head dim 256，RoPE 维度 64 |
-| MoE | 256 专家；每 token 激活 8 个路由专家 + 1 个共享专家 |
-| MTP | 多步训练的多 token 预测头 |
-| 上下文 | 原生 262,144 token，可扩展至约 1.01M token |
-
-该混合结构与 Kimi K3 的思路相似：大部分层采用带门控的线性递推以压低长上下文成本，周期性使用全局注意力恢复强内容寻址能力。但具体算子、层比例和 MoE 配置不同，不能视为同一架构。
-
-### 7.2 思维历史保留与 Agent 使用
-
-Qwen3.6 新增了保留历史 reasoning context 的选项，目标是减少多轮迭代开发中反复重建推理状态的开销。实践上仍需区分：
-
-- 模型的 reasoning 内容是否被 API 或框架保留；
-- 工具调用结果、文件摘要和用户需求是否被有效压缩；
-- 服务端上下文窗口是否足以容纳历史状态。
-
-也就是说，thinking preservation 改善的是模型可见的推理历史，并不能替代 Agent harness 的上下文管理。
-
-### 7.3 与 Qwen3 / Qwen3.5 的关系
-
-- **Qwen3**：Dense 与 MoE 并行的通用基础系列，完整技术报告已公开。
-- **Qwen3.5**：强调原生视觉语言基础、混合注意力、稀疏 MoE 和大规模 RL。
-- **Qwen3.6**：在上述基础上把优化重点聚焦于稳定性、真实 coding workflow、仓库级理解及思考历史保留。
-
-### 7.4 部署要点
-
-官方模型卡建议将 262K 作为标准部署窗口；复杂任务至少保留 128K，以避免过度压缩推理与工具历史。MTP 可用于 speculative decoding，但实际吞吐取决于接受率、批大小、KV cache 格式与推理框架实现。
-
-### 7.5 公式化补充：混合注意力、MoE 与上下文预算
-
-公开模型卡给出层级比例，但未披露 Gated DeltaNet 的逐项状态方程。可用下列门控递推作为理解模型：
-
-$$
-S_t=\alpha_t\odot S_{t-1}
-+\beta_tk_tv_t^\top
--\gamma_tk_t(S_{t-1}^\top k_t)^\top,\qquad
-o_t=S_t^\top q_t.
-$$
-
-$\alpha_t$ 决定旧记忆保留，$\beta_t$ 控制当前写入，最后一项表示沿当前 key 方向对旧状态的 delta 修正。它说明递推层为何不需要保存完整历史 KV；此式是抽象，不应当作 Qwen3.6 未公开的精确实现。
-
-每四层的 Gated Attention 负责全局内容寻址。16 个 Q 头共享 2 个 KV 头时，令 $g(a)$ 把 Q 头 $a$ 映射到相应 KV 组，则
-
-$$
-o_i^{(a)}=\sum_{j\le i}
-\operatorname{softmax}_j\left(
-\frac{(R_iq_i^{(a)})^\top(R_jk_j^{(g(a))})}{\sqrt d}
-\right)v_j^{(g(a))}.
-$$
-
-这就是 GQA 的缓存节省来源：Q 头数可以较多，而 KV 头数较少。周期性全局注意力补足线性递推对精确远程检索的局限。
-
-MoE 与 MTP 分别服务于容量和吞吐：
-
-$$
-\mathcal E_t=\operatorname{TopK}(\operatorname{softmax}(W_rx_t),8),\qquad
-y_t=E_{\rm shared}(x_t)+\sum_{e\in\mathcal E_t}\tilde p_{t,e}E_e(x_t),
-$$
-
-$$
-\mathcal L_{\rm MTP}=-\sum_{s=1}^{S}\lambda_s\sum_t
-\log p_\theta(x_{t+s}\mid x_{\le t},s).
-$$
-
-前者解释“35B 总参数但约 3B 激活参数”，后者解释 speculative decoding 的草稿来源；二者都不直接等价于长上下文注意力优化。
-
-在 agent 实践中，上下文还受硬预算约束：
-
-$$
-|C_{\rm system}|+|C_{\rm task}|+|C_{\rm tool}|+
-|C_{\rm reasoning}|\le B.
-$$
-
-reasoning history preservation 只是允许 $C_{\rm reasoning}$ 跨轮延续。工具输出、补丁、日志仍需做摘要和引用定位，否则它们会挤占代码与任务所需的上下文。
-
-### 参考资料
-
-- [Qwen3.6 官方仓库](https://github.com/QwenLM/Qwen3.6)
-- [Qwen3.6-35B-A3B 官方模型卡](https://huggingface.co/Qwen/Qwen3.6-35B-A3B)
-- [Qwen3 技术报告](https://arxiv.org/abs/2505.09388)
+部署长上下文时，应分别记录 prefill、TPOT、KV 占用、专家通信与 cache 命中；只有将这些指标和任务成功率一起看，才能判断具体架构改动是否真正适合应用。

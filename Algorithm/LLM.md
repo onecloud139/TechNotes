@@ -3629,7 +3629,152 @@ AWPO的目标函数基于PPO的clip机制，结合了加权优势信号：
 
 $$L_{\text{AWPO}} = -\frac{1}{G \cdot K} \sum_{g=1}^G \sum_{j=1}^K \min\left( r_{g,j} \cdot A_{g,j}, \text{clip}(r_{g,j}, 1-\epsilon_{\text{low}} \cdot s_g, 1+\epsilon_{\text{high}} \cdot s_g) \cdot A_{g,j} \right)$$
 
+### 近期补充：Dr.GRPO、REINFORCE++ 与 VAPO
 
+> 这些方法主要用于 **RLVR（Reinforcement Learning with Verifiable Rewards）** 和长 CoT 训练，仍属快速演化的研究/工程配方；论文的单一基准结果不能直接外推到所有模型和奖励函数。
+
+#### Dr.GRPO（GRPO Done Right）
+
+标准 GRPO 的组内优势通常为：
+
+$$
+\hat A_i^{\mathrm{GRPO}}=
+\frac{r_i-\bar r}{s_r+\varepsilon},
+\qquad
+\bar r=\frac1G\sum_{j=1}^{G}r_j.
+$$
+
+Dr.GRPO 指出，组标准差归一化与“每条回答按自身长度平均”的组合会产生长度相关偏差，可能人为拉长输出。它使用只做均值中心化的优势，并以组级长度统一聚合：
+
+$$
+\hat A_i^{\mathrm{Dr}}=r_i-\bar r,
+\qquad
+\mathcal L_{\mathrm{Dr}}=
+-\frac1G\sum_{i=1}^{G}
+\frac{1}{\sum_{j=1}^{G}T_j}
+\sum_{t=1}^{T_i}
+\log\pi_\theta(y_{i,t}\mid x,y_{i,<t})\,\hat A_i.
+$$
+
+这不是与 GRPO 无关的新范式，而是对其长度/归一化偏差的修正；实际实现仍可保留重要性比率剪裁和 KL 正则。适合可验证奖励、且回答长度分布明显变化的推理任务。
+
+#### REINFORCE++
+
+REINFORCE++ 回到无 Critic 的 REINFORCE 路线，但吸收 PPO 的稳定化技巧，如 KL 控制、奖励/优势归一化和 mini-batch 更新：
+
+$$
+\mathcal L_{\mathrm{RF++}}=
+-\mathbb E_{y\sim\pi_{\theta_{\mathrm{old}}}}
+\left[
+\sum_{t=1}^{T}\hat A(y)
+\log\pi_\theta(y_t\mid x,y_{<t})
+\right]
++\beta D_{\mathrm{KL}}(\pi_\theta\Vert\pi_{\mathrm{ref}}).
+$$
+
+它用 rollout 内基线构造 $\hat A$，不训练大型 value/critic 网络，因此通常比 PPO 少一套模型状态；但仍需 on-policy 采样，长轨迹与稀疏奖励下的方差控制高度依赖奖励设计和批内基线。
+
+#### VAPO（Value-based Augmented PPO）
+
+VAPO 面向长 CoT 推理，重新采用 value-based PPO 来处理价值偏差、异构回答长度和终局奖励稀疏。它仍以 GAE 为骨架：
+
+$$
+\delta_t=r_t+\gamma V_\phi(s_{t+1})-V_\phi(s_t),
+\qquad
+\hat A_t^{\mathrm{GAE}(\lambda)}
+=\sum_{l\ge0}(\gamma\lambda)^l\delta_{t+l},
+$$
+
+$$
+\mathcal L_{\mathrm{clip}}=
+-\mathbb E_t\left[
+\min\left(
+\rho_t\hat A_t,\
+\operatorname{clip}(\rho_t,1-\epsilon,1+\epsilon)\hat A_t
+\right)\right],
+\qquad
+\rho_t=\frac{\pi_\theta(a_t\mid s_t)}
+{\pi_{\theta_{\mathrm{old}}}(a_t\mid s_t)}.
+$$
+
+应把它理解成“为 reasoning 场景重新让 value-based PPO 可用”的系统方案，而非证明 Critic 总优于 GRPO。它适合预算充足、希望从步骤级价值信号获得更细 credit assignment 的长推理训练。
+
+### OPD（On-Policy Distillation）：从学生自己会犯的错误中学习
+
+**OPD 不是奖励最大化算法，而是蒸馏式后训练。** 它放在 RLHF/RLVR 附近，是因为同样依赖当前学生策略在线 rollout，也能与 RL 损失联合。
+
+传统离线蒸馏在教师轨迹或固定数据上训练：
+
+$$
+y^T\sim\pi_T(\cdot\mid x),\qquad
+\mathcal L_{\mathrm{offline\ KD}}=
+\sum_tD_{\mathrm{KL}}\left(
+\pi_T(\cdot\mid x,y^T_{<t})
+\Vert\pi_\theta(\cdot\mid x,y^T_{<t})
+\right).
+$$
+
+部署时的前缀却来自学生自身；学生一旦偏离教师轨迹，后续进入的状态就可能没有被训练覆盖。OPD（原始论文也称 GKD）改为先采样学生轨迹：
+
+$$
+y\sim\pi_\theta(\cdot\mid x),
+$$
+
+再让教师在**学生生成的前缀**上提供 token 分布监督：
+
+$$
+\mathcal L_{\mathrm{OPD}}=
+\mathbb E_{y\sim\pi_\theta}
+\left[
+\sum_{t=1}^{T}
+D_{\mathrm{KL}}\left(
+\pi_T(\cdot\mid x,y_{<t})
+\Vert\pi_\theta(\cdot\mid x,y_{<t})
+\right)
+\right].
+$$
+
+学生不只是模仿“教师会怎么写”，而是在“自己已走到这里”的条件下学习教师怎样续写或纠错。这特别适合推理/agent 蒸馏：早期偏差会改变后续工具调用和环境状态，离线教师轨迹难以覆盖。
+
+与 RL 联合时可写成：
+
+$$
+\mathcal L=
+\mathcal L_{\mathrm{RLVR/RLHF}}
++\lambda_{\mathrm{OPD}}\mathcal L_{\mathrm{OPD}}
++\beta D_{\mathrm{KL}}(\pi_\theta\Vert\pi_{\mathrm{ref}}).
+$$
+
+前项负责奖励目标，OPD 项负责学生实际会访问的状态上的局部教师指导，KL 项限制策略漂移。
+
+**工程边界：**
+
+1. token-level OPD 需要教师 logits/概率；纯文本黑盒 API 通常只能退化为 SFT、偏好蒸馏或教师重写。
+2. 教师—学生能力差过大时，学生前缀可能离轨到教师也难以可靠指导的区域。
+3. 在线教师查询有成本；可只蒸馏高熵/关键 token，缓存前缀，或混合离线数据。
+
+#### TrOPD：OPD 的近期稳定化变体（研究前沿）
+
+Trust Region OPD（TrOPD）针对“学生前缀偏离太远后，教师监督不可靠”的问题，用可信掩码 $m_t$ 区分可蒸馏和离群 token：
+
+$$
+\mathcal L_{\mathrm{TrOPD}}
+=\sum_t m_tD_{\mathrm{KL}}(\pi_T\Vert\pi_\theta)
++\sum_t(1-m_t)\mathcal L_{\mathrm{outlier},t}
++\lambda_{\mathrm{off}}\mathcal L_{\mathrm{off\text{-}policy}}.
+$$
+
+$m_t=1$ 表示学生状态仍在教师可可靠指导的 trust region；离群 token 使用裁剪、屏蔽或更保守的替代估计，并以教师前缀的离线指导拉回可学习区域。该式是结构概括而非论文逐项实现；TrOPD 目前仍是预印本研究，不应视为默认生产配方。
+
+### 选择速查
+
+| 方法 | 是否需要 Critic | 主要训练信号 | 最适合的情况 | 关键风险 |
+| --- | --- | --- | --- | --- |
+| PPO / VAPO | 是 | RM、规则奖励或 value 估计 | 需细粒度 credit assignment、预算充足 | value 偏差与训练复杂度 |
+| GRPO / Dr.GRPO / GSPO / DAPO | 否 | 组内相对可验证奖励 | 数学、代码、可并行采样推理 | 组大小、零方差组、长度/聚合偏差 |
+| REINFORCE++ | 否 | rollout 回报 + 基线 | 希望简化 PPO、降低显存 | on-policy 数据成本与高方差 |
+| DPO | 否 | 离线偏好对 | 高质量偏好数据充足、快速对齐 | 难直接利用在线环境回报 |
+| OPD / TrOPD | 否（蒸馏） | 教师在学生轨迹上的 token 分布 | 压缩推理/agent 能力、减轻 exposure bias | 教师访问成本与能力失配 |
 
 <table>
 <tr>

@@ -22,6 +22,15 @@ GLM-5 的目标是把“给出代码建议”的 vibe coding 推向可长程执�
 
 DSA 不使用固定滑动窗口来决定远程可见性，而是先根据内容选择重要 token，再进行细粒度稀疏注意力计算。报告强调其优势是：可从稠密模型继续训练得到，避免从头训练长上下文稀疏架构的成本；同时保留内容驱动的远程依赖选择。
 
+DSA 的抽象为
+
+$$
+r_{ij}=g(q_i,\tilde k_j),\quad\mathcal C_i=\operatorname{TopK}_j(r_{ij},k),\qquad
+o_i=\sum_{j\in\mathcal C_i\cup\mathcal W_i}\operatorname{softmax}_j(q_i^\top k_j/\sqrt d)v_j.
+$$
+
+当 $k\ll L$ 时，主注意力由 $O(L^2d)$ 近似降至 $O(Lkd)$ 加索引开销。
+
 ### MLA-256 与 Muon Split
 
 GLM-5 采用 MLA 来降低 KV cache，但报告发现常规 MLA 与 Muon 的组合在小型 latent KV 维度下可能不如 GQA。为此提出 **Muon Split**：将注意力上投影矩阵按头切分，再分别执行 Muon 的矩阵正交化。
@@ -30,11 +39,15 @@ GLM-5 采用 MLA 来降低 KV cache，但报告发现常规 MLA 与 Muon 的组�
 - **MLA-256**：通过增大单头维度、减少头数，在保持训练计算与参数量大致不变的前提下降低解码时的点积成本。
 - **边界**：Muon Split 是优化器参数分组/矩阵切分策略，不是新注意力公式。
 
+MLA 的潜变量缓存为 $c_t^{KV}=x_tW_D,\ k_t=c_t^{KV}W_K,\ v_t=c_t^{KV}W_V$。Muon Split 的分头概念更新为 $\Delta W_{t,h}=-\eta\operatorname{Orth}(B_{t,h})$；它是训练期策略。
+
 ## 3. MTP：共享参数的多 token 预测
 
 普通 MTP 若要预测后续多个 token，通常需要多个预测层，会线性增加参数和 KV 状态。GLM-5 在训练中让 3 个 MTP 层共享参数，以较小额外状态换取更长的 speculative decoding 接受长度。
 
 这体现了一个常见工程原则：MTP 的价值不仅是辅助训练损失，也直接影响推理阶段草稿 token 的可接受比例和端到端吞吐。
+
+共享参数 MTP 的目标为 $\mathcal L_{\rm MTP}=-\sum_{s=1}^{S}\lambda_s\sum_t\log p_\phi(x_{t+s}\mid x_{\le t},s)$，其价值在于提高草稿 token 的连续接受长度。
 
 ## 4. 训练流水线：长上下文与异步 Agent RL
 
@@ -57,6 +70,14 @@ GLM-5.2 是 GLM-5.1 之后的长程任务更新。官方模型卡的重点是：
 - **多档思考强度**：让服务侧在效果、时延和成本间调节。
 - **开放权重**：官方模型卡标注为 MIT 许可；页面列出的权重文件总规模为 753B。与 GLM-5 报告的 744B/40B 配置不同，引用时应注明版本和来源，不应混用数值。
 
+IndexShare 的每四层索引复用可写成
+
+$$
+I_l=I_{\,4\lfloor(l-1)/4\rfloor+1}.
+$$
+
+它只共享候选索引，不共享完整注意力输出或 KV cache。
+
 ## 6. 学习时的对照
 
 | 机制 | 主要解决的问题 | 不应混淆为 |
@@ -73,50 +94,11 @@ GLM-5.2 是 GLM-5.1 之后的长程任务更新。官方模型卡的重点是：
 - [GLM-5.2 官方模型卡](https://huggingface.co/zai-org/GLM-5.2)
 - [IndexCache / IndexShare 论文](https://arxiv.org/abs/2603.12201)
 
-## 8. 公式化补充：DSA、Muon Split 与 IndexShare
 
-DSA 的关键是把“索引”与“精算”分开：
+## 7. 扩展：从训练配方到 Agent 系统
 
-$$
-r_{ij}=g(q_i,\tilde k_j),\qquad
-\mathcal C_i=\operatorname{TopK}_j(r_{ij},k),
-$$
+GLM-5 的机制发生在不同时间尺度：DSA/MLA 处理每次注意力与 decode 成本，MTP 处理连续生成吞吐，异步 Agent RL 处理分钟到小时级环境交互。它们不是一个统一算子，调优与观测指标也应分开。
 
-$$
-o_i=\sum_{j\in\mathcal C_i\cup\mathcal W_i}
-\frac{\exp(q_i^\top k_j/\sqrt d)}
-{\sum_{u\in\mathcal C_i\cup\mathcal W_i}\exp(q_i^\top k_u/\sqrt d)}v_j.
-$$
+DSA 的真正难点是索引召回而非单纯减小候选数。代码 agent 中，远程函数定义、测试报错或工具结果未被索引到时，主注意力再精确也无法恢复。IndexShare 复用索引可省 FLOPs，但隐含相邻层对关键位置判断相近的假设。
 
-$g$ 是低成本的内容索引函数；只有候选 $\mathcal C_i$ 和局部窗口 $\mathcal W_i$ 进入完整注意力。若 $k\ll L$，主注意力计算可由 $O(L^2d)$ 降至约 $O(Lkd)$ 加索引开销。该式是阅读报告用的抽象，不是 DSA indexer 的完整公开实现。
-
-MLA 的缓存压缩可概括为
-
-$$
-c_t^{KV}=x_tW_D,\qquad
-k_t=c_t^{KV}W_K,\quad v_t=c_t^{KV}W_V.
-$$
-
-即缓存较小的 $c_t^{KV}$，并在需要时上投影。Muon Split 进一步把注意力投影按头切分；若 $B_{t,h}$ 是第 $h$ 个头的动量块，则概念更新为
-
-$$
-\Delta W_{t,h}=-\eta\,\operatorname{Orth}(B_{t,h}),\qquad
-W_t=W_{t-1}+\operatorname{Concat}_h(\Delta W_{t,h}).
-$$
-
-分别正交化的目的，是避免不同头在同一个大矩阵中相互干扰更新尺度。它是训练期优化器策略，不是推理期注意力层。
-
-共享参数 MTP 可写为
-
-$$
-\mathcal L_{\rm MTP}=-\sum_{s=1}^{S}\lambda_s\sum_t
-\log p_\phi(x_{t+s}\mid x_{\le t},s).
-$$
-
-而 IndexShare 的“每 4 层复用一次索引”可用简化关系表示：
-
-$$
-I_l=I_{\,4\lfloor(l-1)/4\rfloor+1}.
-$$
-
-后式只表达调度方式：相邻 4 层共享候选索引，并不表示它们共享完整注意力输出或 KV cache。
+共享 MTP 的端到端价值取决于平均接受长度和验证开销；草稿很长但频繁被拒绝并不会加速。异步 RL 则需要处理策略版本滞后、环境非确定性与奖励延迟，对代码任务还要隔离执行环境，避免缓存或外部服务污染奖励。
