@@ -1,4 +1,4 @@
-﻿# 基础知识点
+# 基础知识点
 
 ## 机器学习范式
 
@@ -2020,7 +2020,7 @@ HDBSCAN（Hierarchical Density-Based Spatial Clustering of Applications with Noi
 * **核心距离**
 
   * 定义：
-    $\operatorname{core}_k(x_i)=d\bigl(x_i,x_i^{(k)}\bigr)$
+    $\mathrm{core}_k(x_i)=d\bigl(x_i,x_i^{(k)}\bigr)$
 
   * 其中  $x_i^{(k)}$  表示点  $x_i$  的第  $k$  个近邻，且  $k=\text{min\_samples}$
 
@@ -2029,7 +2029,7 @@ HDBSCAN（Hierarchical Density-Based Spatial Clustering of Applications with Noi
 
 * **互相可达距离**
 
-  * 定义：  $d_{\mathrm{mreach}}(x_i,x_j)=\max\{\operatorname{core}_k(x_i),\operatorname{core}_k(x_j),d(x_i,x_j)\}$
+  * 定义：  $d_{\mathrm{mreach}}(x_i,x_j)=\max\{\mathrm{core}_k(x_i),\mathrm{core}_k(x_j),d(x_i,x_j)\}$
 
   * 含义：两个点之间是否容易连接，不仅取决于它们的几何距离，还取决于它们各自所在区域的密度
 
@@ -2069,7 +2069,7 @@ HDBSCAN（Hierarchical Density-Based Spatial Clustering of Applications with Noi
 * **簇稳定性选择**
 
   * 稳定性定义：
-    $\operatorname{Stability}(C)=\sum_{x_i\in C}\bigl(\lambda_i-\lambda_{\mathrm{birth}}(C)\bigr)$
+    $\mathrm{Stability}(C)=\sum_{x_i\in C}\bigl(\lambda_i-\lambda_{\mathrm{birth}}(C)\bigr)$
 
   * 其中：
 
@@ -2545,380 +2545,621 @@ $$
 
 ## 生成对抗网络（GAN）
 
-GAN 的核心是博弈优化：判别器学习区分真伪，生成器学习“骗过”判别器。理论上可解释为分布距离最小化，工程上重点是稳定训练。
+GAN 通过生成器（Generator）与判别器（Discriminator）的对抗训练学习数据分布。生成器负责产生尽可能逼真的样本，判别器负责区分真实样本与生成样本。
 
-- **1.基本原理与理论推导**
+### 一、基本结构与理论目标
 
-- 记号：$z\sim p_z(z)$，$x_g=G(z)$，$x_g\sim p_g$，判别器 $D(x)\in(0,1)$。
-
-- 原始 min-max 目标：
+设真实数据来自 $p_{data}(x)$，噪声 $z\sim p_z(z)$，生成器输出：
 
 $$
-\min_G\max_D V(D,G)=\mathbb E_{x\sim p_{data}}[\log D(x)]+\mathbb E_{z\sim p_z}[\log(1-D(G(z)))]
+x_g=G_\theta(z),\qquad x_g\sim p_g
 $$
 
-- 固定生成器时，最优判别器：
+判别器输出样本为真实数据的概率 $D_\phi(x)\in(0,1)$。原始 GAN 的极小极大目标为：
+
+$$
+\min_G\max_D V(D,G)
+=\mathbb{E}_{x\sim p_{data}}[\log D(x)]
++\mathbb{E}_{z\sim p_z}[\log(1-D(G(z)))]
+$$
+
+固定生成器时，最优判别器为：
 
 $$
 D^*(x)=\frac{p_{data}(x)}{p_{data}(x)+p_g(x)}
 $$
 
-- 代回后：说明理想情况下是在最小化 JS 散度，最优点为  $p_g=p_{data}$。
+将 $D^*$ 代回目标函数，可得：
 
 $$
-V(D^*,G)=-\log4+2\,JS(p_{data}\|p_g)
-
-- **2.损失函数设计**
-
-- Vanilla BCE： `non-saturating` 形式在早期梯度更强，实践更常用。
-
-$$
-\mathcal L_D=-\mathbb E_{x\sim p_{data}}[\log D(x)]-\mathbb E_{z\sim p_z}[\log(1-D(G(z)))]
+V(D^*,G)=-\log 4+2\,\mathrm{JS}(p_{data}\|p_g)
 $$
 
-$$
-\mathcal L_G^{mm}=\mathbb E_z[\log(1-D(G(z)))],\qquad
-\mathcal L_G^{ns}=-\mathbb E_z[\log D(G(z))]
-$$
+因此，理想最优点是 $p_g=p_{data}$。但实际训练并不是直接计算 JS 散度，而是交替更新判别器和生成器。
 
-- LSGAN：
+### 二、常用损失函数
 
-$$
-\mathcal L_D^{LS}=\frac12\mathbb E_x[(D(x)-1)^2]+\frac12\mathbb E_z[D(G(z))^2],
-\qquad
-\mathcal L_G^{LS}=\frac12\mathbb E_z[(D(G(z))-1)^2]
-$$
+#### 2.1 Vanilla GAN：二元交叉熵
 
-- Hinge GAN：
+判别器希望真实样本得分为 1、生成样本得分为 0：
 
 $$
-\mathcal L_D^{hinge}=\mathbb E_x[\max(0,1-D(x))]+\mathbb E_z[\max(0,1+D(G(z)))]
+\mathcal{L}_D
+=-\mathbb{E}_{x\sim p_{data}}[\log D(x)]
+-\mathbb{E}_{z\sim p_z}[\log(1-D(G(z)))]
 $$
 
-$$
-\mathcal L_G^{hinge}=-\mathbb E_z[D(G(z))]
-$$
-
-- WGAN / WGAN-GP：
+生成器原始的极小极大损失为：
 
 $$
-W_1(p_{data},p_g)=\sup_{\|f\|_L\le1}\mathbb E_{x\sim p_{data}}[f(x)]-\mathbb E_{x\sim p_g}[f(x)]
+\mathcal{L}_G^{mm}=\mathbb{E}_{z\sim p_z}[\log(1-D(G(z)))]
 $$
 
+实际更常用 non-saturating 损失，因为训练早期判别器很容易识别假样本，原始损失的生成器梯度可能过弱：
+
 $$
-\mathcal L_D^{GP}=
-\mathbb E_{\tilde x\sim p_g}[f(\tilde x)]-\mathbb E_{x\sim p_{data}}[f(x)]
-+\lambda\,\mathbb E_{\hat x}(\|\nabla_{\hat x}f(\hat x)\|_2-1)^2
+\mathcal{L}_G^{ns}=-\mathbb{E}_{z\sim p_z}[\log D(G(z))]
+$$
+
+#### 2.2 LSGAN：最小二乘损失
+
+LSGAN 用回归目标代替 BCE，通常可以减轻梯度饱和：
+
+$$
+\mathcal{L}_D^{LS}
+=\frac{1}{2}\mathbb{E}_{x\sim p_{data}}[(D(x)-1)^2]
++\frac{1}{2}\mathbb{E}_{z\sim p_z}[D(G(z))^2]
 $$
 
 $$
-\mathcal L_G^{W}=-\mathbb E_z[f(G(z))]
-
-- **3.训练策略与稳定性**
-
-- 常见不稳定来源：判别器过强、模式崩塌、博弈振荡。
-- 主流技巧：
-  1. 损失优先试 Hinge 或 WGAN-GP。
-  2. 加正则（SN、R1）。R1 公式：
-
-$$
-\mathcal L_{R1}=\frac{\gamma}{2}\mathbb E_{x\sim p_{data}}\|\nabla_x D(x)\|_2^2
+\mathcal{L}_G^{LS}
+=\frac{1}{2}\mathbb{E}_{z\sim p_z}[(D(G(z))-1)^2]
 $$
 
-  3. 控制更新比 $n_D:n_G$（如 1:1 或 5:1）。
-  4. 使用更稳的网络结构（残差、注意力、归一化策略）。
+#### 2.3 Hinge GAN：间隔损失
 
-- **4.条件生成与图像翻译（实战常用）**
+Hinge GAN 通常让判别器输出不经过 Sigmoid 的实数分数：
 
-- cGAN：
+$$
+\mathcal{L}_D^{hinge}
+=\mathbb{E}_{x\sim p_{data}}[\max(0,1-D(x))]
++\mathbb{E}_{z\sim p_z}[\max(0,1+D(G(z)))]
+$$
+
+$$
+\mathcal{L}_G^{hinge}
+=-\mathbb{E}_{z\sim p_z}[D(G(z))]
+$$
+
+#### 2.4 WGAN 与 WGAN-GP：Wasserstein 距离
+
+WGAN 用 Kantorovich-Rubinstein 对偶形式估计 Wasserstein-1 距离：
+
+$$
+W_1(p_{data},p_g)
+=\sup_{\|f\|_L\le 1}
+\mathbb{E}_{x\sim p_{data}}[f(x)]
+-\mathbb{E}_{x\sim p_g}[f(x)]
+$$
+
+这里的判别器更准确地称为 critic，输出实数 $f(x)$，不再使用 Sigmoid 概率。WGAN-GP 用梯度惩罚近似 1-Lipschitz 约束：
+
+$$
+\mathcal{L}_{critic}
+=\mathbb{E}_{x\sim p_g}[f(x)]
+-\mathbb{E}_{x\sim p_{data}}[f(x)]
++\lambda\,\mathbb{E}_{\hat{x}}
+\left(\|\nabla_{\hat{x}}f(\hat{x})\|_2-1\right)^2
+$$
+
+$$
+\mathcal{L}_G^{W}=-\mathbb{E}_{z\sim p_z}[f(G(z))]
+$$
+
+其中插值样本通常为：
+
+$$
+\hat{x}=\epsilon x+(1-\epsilon)G(z),\qquad \epsilon\sim U(0,1)
+$$
+
+### 三、训练流程与稳定性
+
+一次交替训练通常包含以下步骤：
+
+1. 采样真实样本 $x\sim p_{data}$ 和噪声 $z\sim p_z$。
+2. 固定生成器，计算真实样本与生成样本的判别损失，更新判别器或 critic。
+3. 重新采样噪声，固定判别器，计算生成器损失并更新生成器。
+4. 重复以上过程，观察生成质量、判别器分数和训练稳定性。
+
+常见问题包括：
+
+- **模式崩塌（Mode Collapse）**：生成器只产生少数几类样本，缺乏多样性。
+- **判别器过强**：生成器获得的梯度过弱，训练停滞。
+- **博弈振荡**：生成器和判别器互相追逐，损失不收敛。
+- **评价指标与视觉质量不一致**：单一指标不能完整反映样本质量。
+
+常见稳定化手段：
+
+- 使用 Hinge GAN、WGAN-GP 等更适合实践的目标。
+- 在判别器中使用 Spectral Normalization（SN）。
+- 对真实样本加入 R1 正则：
+
+$$
+\mathcal{L}_{R1}
+=\frac{\gamma}{2}\mathbb{E}_{x\sim p_{data}}
+\left[\|\nabla_xD(x)\|_2^2\right]
+$$
+
+- 调整判别器与生成器的更新比 $n_D:n_G$，例如 $1:1$ 或 $5:1$。
+- 合理使用残差结构、归一化、数据增强和渐进式训练。
+
+### 四、条件生成与图像翻译
+
+#### 4.1 cGAN：条件生成
+
+给生成器和判别器同时输入条件 $y$，让模型学习条件分布 $p(x|y)$：
 
 $$
 \min_G\max_D
-\mathbb E_{x,y\sim p_{data}}[\log D(x,y)]
-+
-\mathbb E_{z,y}[\log(1-D(G(z,y),y))]
+\mathbb{E}_{x,y\sim p_{data}}[\log D(x,y)]
++\mathbb{E}_{z,y}[\log(1-D(G(z,y),y))]
 $$
 
-- Pix2Pix（配对）：
+#### 4.2 Pix2Pix：配对图像翻译
+
+Pix2Pix 使用配对数据 $(x,y)$，并在 cGAN 损失之外加入像素级重建损失：
 
 $$
-\mathcal L=\mathcal L_{cGAN}+\lambda\,\mathcal L_{L1},\qquad
-\mathcal L_{L1}=\mathbb E_{x,y}\|y-G(x)\|_1
+\mathcal{L}_{Pix2Pix}
+=\mathcal{L}_{cGAN}+\lambda\mathcal{L}_{L1}
 $$
 
-- CycleGAN（非配对）循环一致性：
-
 $$
-\mathcal L_{cyc}=
-\mathbb E_{x\sim X}\|F(G(x))-x\|_1
-+\mathbb E_{y\sim Y}\|G(F(y))-y\|_1
-
-- **5.评估指标**
-
-- IS：
-
-$$
-IS=\exp\bigl(\mathbb E_x D_{KL}(p(y|x)\|p(y))\bigr)
+\mathcal{L}_{L1}=\mathbb{E}_{x,y}[\|y-G(x)\|_1]
 $$
 
-- FID：
+#### 4.3 CycleGAN：非配对图像翻译
+
+CycleGAN 使用两个生成器 $G:X\rightarrow Y$、$F:Y\rightarrow X$，通过循环一致性约束保持内容结构：
 
 $$
-FID=\|m_r-m_g\|_2^2 + {Tr}\bigl(C_r+C_g-2(C_rC_g)^{1/2}\bigr)
+\mathcal{L}_{cyc}
+=\mathbb{E}_{x\sim X}[\|F(G(x))-x\|_1]
++\mathbb{E}_{y\sim Y}[\|G(F(y))-y\|_1]
 $$
 
+完整目标通常还会加入两个方向的对抗损失和身份损失。
+
+### 五、评估指标
+
+#### 5.1 Inception Score（IS）
+
+$$
+IS=\exp\left(\mathbb{E}_{x\sim p_g}
+\left[D_{KL}(p(y|x)\|p(y))\right]\right)
+$$
+
+IS 希望单个样本的类别分布清晰，同时整个样本集覆盖多个类别；它依赖预训练分类器，不能直接衡量与真实数据分布的距离。
+
+#### 5.2 Fréchet Inception Distance（FID）
+
+在特征空间中分别拟合真实样本与生成样本的高斯分布：
+
+$$
+FID=\|m_r-m_g\|_2^2
++\mathrm{Tr}\left(C_r+C_g-2(C_rC_g)^{1/2}\right)
+$$
+
+FID 越低通常表示生成分布越接近真实分布，但仍会受到特征提取器、样本数量和数据预处理方式影响。
 
 # 强化学习基础
 
-强化学习（Reinforcement Learning, RL）研究智能体如何在与环境交互中，通过试错最大化长期累积奖励。
+## 第一部分：理论基础
 
-## 马尔可夫决策过程（MDP）
+### 1. 强化学习问题与 MDP
 
-一个标准 MDP 可表示为五元组：
+强化学习研究智能体如何与环境交互，通过试错最大化长期累积奖励。标准马尔可夫决策过程（MDP）表示为：
 
 $$
-\mathcal M=(\mathcal S,\mathcal A,P,R,\gamma)
+\mathcal{M}=(\mathcal{S},\mathcal{A},P,R,\gamma)
 $$
 
--   $\mathcal S$ ：状态空间
--   $\mathcal A$ ：动作空间
--   $P(s'|s,a)$：状态转移概率
--   $R(s,a)$：即时奖励
--   $\gamma\in[0,1)$：折扣因子
+- $\mathcal{S}$：状态空间。
+- $\mathcal{A}$：动作空间。
+- $P(s'|s,a)$：状态转移概率。
+- $R(s,a)$ 或 $R(s,a,s')$：即时奖励。
+- $\gamma\in[0,1)$：折扣因子。
+- $\pi_\theta(a|s)$：参数化策略，表示在状态 $s$ 下选择动作 $a$ 的概率。
 
-时刻 $t$ 的回报定义为：
+在时间 $t$，智能体观察 $s_t$，按照策略采样 $a_t$，获得 $r_{t+1}$，环境转移到 $s_{t+1}$。轨迹可以写为：
+
+$$
+\tau=(s_0,a_0,r_1,s_1,a_1,r_2,\ldots)
+$$
+
+“马尔可夫”表示给定当前状态后，下一状态与奖励不再依赖更早的历史。若观测不能完整表示环境状态，则更准确的建模是部分可观测 MDP（POMDP），此时智能体通常需要根据历史观测形成信念状态或使用记忆模型。
+
+### 2. 回报、价值函数与优势函数
+
+从时刻 $t$ 开始的折扣回报为：
 
 $$
 G_t=\sum_{k=0}^{\infty}\gamma^k r_{t+k+1}
 $$
 
-若是有限步回合（episodic）问题，终止时刻为 $T$，则
+有限回合在终止时刻 $T$ 结束：
 
 $$
 G_t=\sum_{k=0}^{T-t-1}\gamma^k r_{t+k+1}
 $$
 
-折扣因子 $\gamma$ 越大，模型越关注长期收益；$\gamma$ 越小，越偏向短期收益。
-
-## 价值函数与贝尔曼方程
-
--   **状态价值函数：**
+策略价值函数和动作价值函数分别为：
 
 $$
-V^\pi(s)=\mathbb E_\pi[G_t|s_t=s]
-$$
-
--   **动作价值函数：**
-
-$$
-Q^\pi(s,a)=\mathbb E_\pi[G_t|s_t=s,a_t=a]
-$$
-
--   **贝尔曼期望方程：**
-
-$$
-V^\pi(s)=\sum_a\pi(a|s)\sum_{s'}P(s'|s,a)\left[R(s,a)+\gamma V^\pi(s')\right]
-$$
-
--   **贝尔曼最优方程：**
-
-$$
-V^*(s)=\max_a \sum_{s'}P(s'|s,a)\left[R(s,a)+\gamma V^*(s')\right]
+V^\pi(s)=\mathbb{E}_\pi[G_t|s_t=s]
 $$
 
 $$
-Q^*(s,a)=\sum_{s'}P(s'|s,a)\left[R(s,a)+\gamma \max_{a'}Q^*(s',a')\right]
+Q^\pi(s,a)=\mathbb{E}_\pi[G_t|s_t=s,a_t=a]
 $$
 
-定义时序差分误差（TD Error）：
+优势函数衡量动作相对当前策略平均水平的好坏：
 
 $$
-\delta_t=r_{t+1}+\gamma V(s_{t+1})-V(s_t)
+A^\pi(s,a)=Q^\pi(s,a)-V^\pi(s)
 $$
 
-它衡量“当前估计”与“自举目标”的差距，是大多数 RL 更新的核心信号。
-
-## 方法谱系：DP / MC / TD
-
--   **动态规划（DP）：**
-    -   要求已知环境转移概率 $P(s'|s,a)$
-    -   典型方法：策略迭代、价值迭代
-    -   价值迭代更新：
+策略熵为：
 
 $$
-V_{k+1}(s)=\max_a\sum_{s'}P(s'|s,a)\left[R(s,a)+\gamma V_k(s')\right]
+\mathcal{H}(\pi(\cdot|s))=-\sum_a\pi(a|s)\log\pi(a|s)
 $$
 
--   **蒙特卡洛（MC）：**
-    -   不需要环境模型
-    -   用完整回合回报更新价值，方差较大但无 bootstrap 偏差
-    -   增量式更新：
+熵越大，策略越分散；熵正则常用于鼓励探索。
+
+### 3. 贝尔曼方程与价值估计
+
+贝尔曼期望方程为：
+
+$$
+V^\pi(s)=\sum_a\pi(a|s)\sum_{s'}P(s'|s,a)
+\left[R(s,a,s')+\gamma V^\pi(s')\right]
+$$
+
+贝尔曼最优方程为：
+
+$$
+V^*(s)=\max_a\sum_{s'}P(s'|s,a)
+\left[R(s,a,s')+\gamma V^*(s')\right]
+$$
+
+$$
+Q^*(s,a)=\sum_{s'}P(s'|s,a)
+\left[R(s,a,s')+\gamma\max_{a'}Q^*(s',a')\right]
+$$
+
+时序差分误差（TD Error）为：
+
+$$
+\delta_t=r_{t+1}+\gamma(1-d_t)V_\phi(s_{t+1})-V_\phi(s_t)
+$$
+
+其中 $d_t$ 表示当前转移是否终止。TD 误差既可以作为 Critic 的学习信号，也可以作为优势估计的基本单元。
+
+### 4. DP、MC 与 TD：三种估计思路
+
+| 方法 | 是否需要环境模型 | 是否等待回合结束 | 是否使用 bootstrap | 特点 |
+| --- | --- | --- | --- | --- |
+| 动态规划（DP） | 需要 | 不需要 | 是 | 适合已知小规模环境 |
+| 蒙特卡洛（MC） | 不需要 | 通常需要 | 否 | 无 bootstrap 偏差，但方差大 |
+| 时序差分（TD） | 不需要 | 不需要 | 是 | 可在线更新，偏差与方差折中 |
+
+动态规划的价值迭代为：
+
+$$
+V_{k+1}(s)=\max_a\sum_{s'}P(s'|s,a)
+\left[R(s,a,s')+\gamma V_k(s')\right]
+$$
+
+蒙特卡洛增量更新为：
 
 $$
 V(s)\leftarrow V(s)+\alpha\left(G_t-V(s)\right)
 $$
 
--   **时序差分（TD）：**
-    -   不需要完整回合，可在线更新
-    -   用一步目标自举，方差更低、学习更快
-    -   TD(0) 更新：
+TD(0) 更新为：
 
 $$
-V(s_t)\leftarrow V(s_t)+\alpha\left[r_{t+1}+\gamma V(s_{t+1})-V(s_t)\right]
+V(s_t)\leftarrow V(s_t)+\alpha
+\left[r_{t+1}+\gamma V(s_{t+1})-V(s_t)\right]
 $$
 
-## 经典控制方法：Q-Learning 与 SARSA
+### 5. 策略梯度、REINFORCE 与 Actor-Critic
 
-### Q-Learning（离策略）
-
-$$
-Q(s_t,a_t)\leftarrow Q(s_t,a_t)+\alpha\left[r_{t+1}+\gamma\max_{a'}Q(s_{t+1},a')-Q(s_t,a_t)\right]
-$$
-
--   使用下一状态的贪心价值作为目标（off-policy）。
--   目标策略是贪心策略，行为策略通常是 $\epsilon$-greedy。
-
-### SARSA（在策略）
+直接优化策略的期望回报：
 
 $$
-Q(s_t,a_t)\leftarrow Q(s_t,a_t)+\alpha\left[r_{t+1}+\gamma Q(s_{t+1},a_{t+1})-Q(s_t,a_t)\right]
+J(\theta)=\mathbb{E}_{\tau\sim\pi_\theta}
+\left[\sum_t r_{t+1}\right]
 $$
 
--   使用实际采样到的下一动作（on-policy），通常更保守稳定。
-
-- **Q-Learning 与 SARSA 的差异**
-
--   Q-Learning 的目标是 $\max_{a'}Q(s_{t+1},a')$，更激进，学习最优策略速度常更快。
--   SARSA 的目标是 $Q(s_{t+1},a_{t+1})$，考虑了行为策略探索噪声，安全约束任务更常用。
-
-## 策略梯度与 Actor-Critic
-
-### 策略梯度（Policy Gradient）
-
-直接优化参数化策略 $\pi_\theta(a|s)$：
+策略梯度定理给出：
 
 $$
-J(\theta)=\mathbb E_{\tau\sim\pi_\theta}\left[\sum_t r_t\right]
+\nabla_\theta J(\theta)
+=\mathbb{E}_{\pi_\theta}
+\left[\nabla_\theta\log\pi_\theta(a_t|s_t)Q^\pi(s_t,a_t)\right]
 $$
 
-$$
-\nabla_\theta J(\theta)=\mathbb E_{\pi_\theta}\left[\nabla_\theta \log \pi_\theta(a_t|s_t)\, G_t\right]
-$$
-
-常见改进是用优势函数 $A(s,a)=Q(s,a)-V(s)$ 来降低方差，即
+REINFORCE 直接用采样回报估计 $Q$：
 
 $$
 \nabla_\theta J(\theta)\approx
-\mathbb E\left[\nabla_\theta\log\pi_\theta(a_t|s_t)\,\hat A_t\right]
+\frac{1}{N}\sum_{i,t}
+\nabla_\theta\log\pi_\theta(a_t^i|s_t^i)G_t^i
 $$
 
-并使用 baseline（如 $V(s_t)$）降低梯度估计方差而不引入偏差。
-
-### Actor-Critic
-
--   Actor：更新策略 $\pi_\theta$
--   Critic：估计价值函数 $V_\phi$ 或 $Q_\phi$
--   通过 Critic 提供低方差学习信号，提高训练效率
-
-常见一阶更新形式：
+为了降低方差，通常减去不改变期望的 baseline，使用优势函数：
 
 $$
-\theta\leftarrow \theta+\alpha_\pi \nabla_\theta\log\pi_\theta(a_t|s_t)\,\hat A_t
+\nabla_\theta J(\theta)\approx
+\mathbb{E}\left[\nabla_\theta\log\pi_\theta(a_t|s_t)\hat A_t\right]
 $$
 
-$$
-\phi\leftarrow \phi-\alpha_v \nabla_\phi\left(V_\phi(s_t)-\hat V_t^{target}\right)^2
-$$
-
-## 深度强化学习（DQN / PPO / SAC）
-
-### DQN（值函数方法，离散动作）
-
-用神经网络 $Q_\theta(s,a)$ 近似动作价值函数，最小化 TD 损失：
+Actor-Critic 中，Actor 更新策略，Critic 学习 $V_\phi$ 或 $Q_\phi$：
 
 $$
-y_t=r_{t+1}+\gamma \max_{a'}Q_{\theta^-}(s_{t+1},a')
+\mathcal{L}_{actor}
+=-\mathbb{E}\left[\log\pi_\theta(a_t|s_t)\hat A_t\right]
 $$
 
 $$
-\mathcal L(\theta)=\mathbb E\left[(y_t-Q_\theta(s_t,a_t))^2\right]
+\mathcal{L}_{critic}
+=\mathbb{E}\left[(V_\phi(s_t)-\hat V_t^{target})^2\right]
 $$
 
-其中 $\theta^-$ 是目标网络参数，周期性从 $\theta$ 同步，用于稳定训练。  
-经验回放（Replay Buffer）通过随机采样打破样本相关性、提升样本利用率。
+### 6. On-policy、Off-policy 与探索
 
-### PPO（策略优化，on-policy）
+- **On-policy**：使用当前策略采样的数据更新当前策略，例如 REINFORCE、A2C、PPO。数据通常不能长期复用。
+- **Off-policy**：可以使用旧策略或行为策略采样的数据，例如 Q-Learning、DQN、SAC。样本可以存入 Replay Buffer 重复利用。
+- **探索**：通过 $\epsilon$-greedy、策略熵、参数噪声或 UCB 等方法在探索新动作和利用当前最优动作之间折中。
 
-定义概率比：
 
-$$
-r_t(\theta)=\frac{\pi_\theta(a_t|s_t)}{\pi_{\theta_{old}}(a_t|s_t)}
-$$
+### 7. 策略评估、策略改进与广义策略迭代
 
-裁剪目标：
+给定一个固定策略 $\pi$，策略评估的目标是求解它的价值函数。迭代形式的贝尔曼期望更新为：
 
 $$
-\mathcal L^{clip}(\theta)=
-\mathbb E\left[
-\min\left(r_t(\theta)\hat A_t,\;
-\text{clip}(r_t(\theta),1-\epsilon,1+\epsilon)\hat A_t\right)
-\right]
+V_{k+1}^{\pi}(s)
+=\sum_a\pi(a|s)\sum_{s'}P(s'|s,a)
+\left[R(s,a,s')+\gamma V_k^{\pi}(s')\right]
 $$
 
-通过限制策略步长，避免一次更新过大导致性能崩塌；工程上鲁棒且调参相对容易。
-
-### SAC（最大熵 Actor-Critic，off-policy）
-
-在奖励之外加入策略熵，鼓励探索：
+策略改进则根据当前价值函数选择更优动作：
 
 $$
-J(\pi)=\sum_t \mathbb E_{(s_t,a_t)\sim \rho_\pi}\left[r(s_t,a_t)+\alpha \mathcal H(\pi(\cdot|s_t))\right]
+\pi_{new}(s)=\arg\max_a Q^{\pi}(s,a)
 $$
 
-其中 $\alpha$ 为温度系数，控制“奖励最大化”和“熵最大化”的权衡。  
-SAC 常用于连续控制任务，样本效率高、稳定性好。
-
-## 探索-利用权衡
-
--   **$\epsilon$-greedy：** 以概率 $\epsilon$ 随机探索，否则选 $\arg\max_a Q(s,a)$。
--   **退火策略：** $\epsilon$ 随训练逐步下降（如线性或指数衰减）。
--   **熵正则：** 在目标中加入 $\alpha \mathcal H(\pi(\cdot|s))$ 保持策略随机性。
--   **UCB（Bandit）：**
+策略改进定理说明，在适当条件下，贪心改进得到的策略不会比原策略差：
 
 $$
-a_t=\arg\max_a\left(\hat\mu_a + c\sqrt{\frac{\ln t}{N_t(a)}}\right)
+V^{\pi_{new}}(s)\ge V^{\pi}(s),\qquad \forall s
 $$
 
-其中 $N_t(a)$ 为动作被选择次数，不确定性高的动作会获得探索奖励。
+**广义策略迭代（GPI）**不断交替执行策略评估和策略改进：
 
-## 离线强化学习（Offline RL）基础
+1. 固定策略，估计 $V^\pi$ 或 $Q^\pi$。
+2. 根据价值估计改进策略。
+3. 重复以上过程直到策略或价值函数收敛。
 
-离线 RL 只使用固定历史数据集 $\mathcal D=\{(s,a,r,s')\}$ 训练，不再与环境交互。
+策略迭代完整地执行策略评估，价值迭代则把评估和改进合并到一次最优性更新中。Actor-Critic 也可以看成 GPI 的近似形式：Critic 不完全求解价值函数，Actor 根据不精确的价值信号逐步改进策略。
 
--   **核心难点：** 分布外动作（OOD action）导致 Q 值过估计。
--   **常见约束思路：**
-    -   行为克隆约束策略不要偏离数据分布太远
-    -   保守 Q 学习，惩罚对未见动作的过高估计
-    -   支持集约束（只在数据分布附近优化）
+### 8. n-step Return 与偏差—方差权衡
 
-## RL 评估与实验规范
+一步 TD 目标依赖短期奖励和价值函数估计，Monte Carlo 目标则等待完整回合。二者之间可以用 n-step return 连接：
 
--   **在线评估：** 在独立随机种子环境中运行多回合，报告平均回报和标准差。
--   **离线评估：** 可用 OPE（Off-Policy Evaluation）估计新策略价值。
--   **常见 OPE 方法：**
-    -   Importance Sampling（IS）
-    -   Weighted IS
-    -   Doubly Robust（DR）
+$$
+G_t^{(n)}
+=\sum_{k=0}^{n-1}\gamma^k r_{t+k+1}
++\gamma^n V(s_{t+n})
+$$
 
--   **训练曲线解读：**
-    -   看收敛速度（sample efficiency）
-    -   看稳定性（是否高频震荡/崩塌）
-    -   看最终性能方差（多 seed）
+$n$ 较小时，目标更依赖 bootstrap，方差较低但偏差可能较大；$n$ 较大时，更接近真实回报，偏差较低但方差可能增大。TD($\lambda$) 用不同步长的回报加权：
 
-## 实践注意事项
+$$
+G_t^{\lambda}
+=(1-\lambda)\sum_{n=1}^{\infty}
+\lambda^{n-1}G_t^{(n)}
+$$
 
--   奖励设计要避免“奖励黑客”（模型钻规则漏洞）。
--   训练与评估环境要分离，防止对特定随机种子过拟合。
--   关注样本效率、稳定性与安全约束（动作约束、风险惩罚）。
--   离线 RL 需重点控制分布外动作带来的估计偏差。
--   强化学习实验可复现性要记录：环境版本、seed、超参数、评估协议。
+GAE 正是把这种思想应用到优势函数估计中。理解 $n$ 或 $\lambda$ 的作用，比死记某个默认超参数更重要。
+
+### 9. Bellman 算子的收缩性与收敛直觉
+
+定义策略的 Bellman 算子：
+
+$$
+(T^\pi V)(s)
+=\sum_a\pi(a|s)\sum_{s'}P(s'|s,a)
+\left[R(s,a,s')+\gamma V(s')\right]
+$$
+
+当 $0\le\gamma<1$ 时，Bellman 期望算子在无穷范数下是压缩映射：
+
+$$
+\|T^\pi V-T^\pi U\|_\infty
+\le\gamma\|V-U\|_\infty
+$$
+
+因此反复应用 $T^\pi$ 会收敛到唯一的不动点 $V^\pi$。最优 Bellman 算子同样具有收缩性，这解释了表格型价值迭代为什么能够收敛。
+
+## 第二部分：强化学习实现
+
+### 1. 一次 RL 训练迭代的完整闭环
+
+工程上可以把一次迭代拆成四步：
+
+1. **Rollout**：用当前策略与环境交互，收集 $(s_t,a_t,r_{t+1},s_{t+1},d_t)$。
+2. **评估轨迹**：计算回报、价值目标、优势函数和旧策略 log probability。
+3. **更新模型**：根据 value loss、policy loss、熵正则和其他约束项更新参数。
+4. **评估与诊断**：检查平均回报、成功率、轨迹长度、异常轨迹和训练指标，再进入下一轮采样。
+
+通用训练数据可表示为：
+
+$$
+\mathcal{D}_{rollout}
+=\{(s_t,a_t,r_{t+1},d_t,\log\pi_{old}(a_t|s_t),V_{old}(s_t))\}
+$$
+
+实现中最容易出错的是 mask：padding、EOS 之后的 token 和无效动作不能参与 log probability、优势和损失计算。
+
+### 2. 价值方法的实现：Q-Learning 与 DQN
+
+Q-Learning 使用贪心目标更新动作价值：
+
+$$
+Q(s_t,a_t)\leftarrow Q(s_t,a_t)+\alpha
+\left[r_{t+1}+\gamma(1-d_t)\max_{a'}Q(s_{t+1},a')-Q(s_t,a_t)\right]
+$$
+
+DQN 用神经网络 $Q_\theta(s,a)$ 近似 Q 函数，目标网络 $Q_{\theta^-}$ 提供相对稳定的 bootstrap 目标：
+
+$$
+y_t=r_{t+1}+\gamma(1-d_t)\max_{a'}Q_{\theta^-}(s_{t+1},a')
+$$
+
+$$
+\mathcal{L}_{DQN}(\theta)
+=\mathbb{E}_{(s,a,r,s')\sim\mathcal{D}}
+\left[(y_t-Q_\theta(s_t,a_t))^2\right]
+$$
+
+Replay Buffer 打破连续轨迹的相关性；目标网络周期性同步；Double DQN 则把“动作选择”和“动作评估”分开，以减轻 Q 值过估计。DQN 适合离散动作，是理解经验回放、目标网络和 TD 学习的重要实现案例。
+
+### 3. Actor-Critic 的实现：GAE 与 PPO 的共同基础
+
+使用 Critic 估计 $V_\phi$ 时，先计算 TD 残差：
+
+$$
+\delta_t=r_{t+1}+\gamma(1-d_t)V_\phi(s_{t+1})-V_\phi(s_t)
+$$
+
+GAE 用多个 TD 残差的指数加权和估计优势：
+
+$$
+\hat A_t^{GAE(\gamma,\lambda)}
+=\sum_{l=0}^{T-t-1}(\gamma\lambda)^l\delta_{t+l}
+$$
+
+价值目标通常取：
+
+$$
+\hat V_t^{target}=\hat A_t^{GAE}+V_\phi(s_t)
+$$
+
+$\lambda$ 越大越接近 Monte Carlo，方差更高；$\lambda$ 越小越依赖短期 bootstrap，偏差可能更大。实现中通常对有效时间步的优势做标准化，并在反向传播前停止其梯度。
+
+### 4. PPO 的实现
+
+PPO 比较新旧策略对同一个动作的概率：
+
+$$
+r_t(\theta)=\frac{\pi_\theta(a_t|s_t)}{\pi_{old}(a_t|s_t)}
+=\exp\left(\log\pi_\theta(a_t|s_t)-\log\pi_{old}(a_t|s_t)\right)
+$$
+
+裁剪策略目标为：
+
+$$
+\mathcal{L}_{PPO}^{clip}
+=\mathbb{E}\left[\min\left(
+ r_t(\theta)\hat A_t,
+ \mathrm{clip}(r_t(\theta),1-\epsilon,1+\epsilon)\hat A_t
+\right)\right]
+$$
+
+实际最小化的总损失通常写为：
+
+$$
+\mathcal{L}_{total}
+=-\mathcal{L}_{PPO}^{clip}
++c_v\mathcal{L}_{critic}
+-c_H\mathcal{H}(\pi_\theta)
++c_{KL}\mathcal{L}_{KL}
+$$
+
+PPO 的关键实现点：保存 rollout 时的 old log probability；更新时对同一批数据进行有限轮数和 minibatch 训练；监控 ratio、clip fraction、KL 和 entropy，过大时提前停止或降低学习率。
+
+## 第三部分：其他强化学习方法与专题
+
+### 1. 经典算法地图
+
+| 方法 | 主要对象 | On/Off-policy | 适用动作 | 关键思想 |
+| --- | --- | --- | --- | --- |
+| DP | $V/Q$ | 不适用 | 离散为主 | 已知环境模型，策略/价值迭代 |
+| MC | $V/Q$ | On-policy 常见 | 离散或连续 | 用完整回报估计价值 |
+| TD(0) | $V/Q$ | On-policy 常见 | 离散或连续 | 一步 bootstrap |
+| Q-Learning | $Q$ 表 | Off-policy | 离散 | 对下一动作取最大值 |
+| SARSA | $Q$ 表 | On-policy | 离散 | 使用实际采样的下一动作 |
+| DQN | 神经网络 $Q$ | Off-policy | 离散 | Replay Buffer + 目标网络 |
+| REINFORCE | 策略 | On-policy | 离散或连续 | Monte Carlo 策略梯度 |
+| A2C/A3C | Actor + Critic | On-policy | 离散或连续 | 用 Critic 降低策略梯度方差 |
+| PPO | Actor + Critic | On-policy | 离散或连续 | 概率比裁剪 |
+| DDPG/TD3 | Actor + Critic | Off-policy | 连续 | 确定性策略梯度 |
+| SAC | Actor + Critic | Off-policy | 连续 | 最大熵强化学习 |
+
+### 2. SARSA 与 Q-Learning 的差异
+
+SARSA 使用实际执行的下一动作，是 on-policy 方法：
+
+$$
+Q(s_t,a_t)\leftarrow Q(s_t,a_t)+\alpha
+\left[r_{t+1}+\gamma(1-d_t)Q(s_{t+1},a_{t+1})-Q(s_t,a_t)\right]
+$$
+
+Q-Learning 使用下一状态的贪心动作，是 off-policy 方法：
+
+$$
+Q(s_t,a_t)\leftarrow Q(s_t,a_t)+\alpha
+\left[r_{t+1}+\gamma(1-d_t)\max_{a'}Q(s_{t+1},a')-Q(s_t,a_t)\right]
+$$
+
+Q-Learning 通常更激进地逼近最优策略，SARSA 则会把行为策略的探索风险反映到更新中。它们是理解“行为策略”和“目标策略”差异的好例子。
+
+### 3. 连续控制：DDPG、TD3 与 SAC
+
+DDPG 使用确定性 Actor $a=\mu_\theta(s)$ 和 Critic $Q_\phi(s,a)$，Actor 通过 Critic 的梯度更新：
+
+$$
+\nabla_\theta J(\theta)
+\approx\mathbb{E}_s
+\left[\nabla_a Q_\phi(s,a)|_{a=\mu_\theta(s)}
+\nabla_\theta\mu_\theta(s)\right]
+$$
+
+TD3 在 DDPG 上加入双 Critic、目标策略平滑和延迟 Actor 更新，以减轻 Q 值过估计。SAC 则最大化奖励与策略熵之和：
+
+$$
+J(\pi)=\mathbb{E}_{\pi}
+\left[\sum_t r_{t+1}+\alpha\mathcal{H}(\pi(\cdot|s_t))\right]
+$$
+
+SAC 适合连续控制，LLM token 动作本质上是离散动作，因此不能直接把 SAC 当作 PPO/GRPO 的替代品；但其最大熵、温度系数和 off-policy 经验复用思想仍有参考价值。
+
+### 4. 离线强化学习
+
+离线 RL 只使用固定数据集：
+
+$$
+\mathcal{D}=\{(s,a,r,s')\}
+$$
+
+它不能通过新交互纠正分布外动作，因此主要风险是 OOD action 导致价值函数过估计。常见思路包括：
+
+- 行为克隆约束策略接近数据分布。
+- 保守 Q 学习，惩罚对未见动作的过高估计。
+- 支持集约束，只在数据分布覆盖的区域内优化。
+- 重要性采样或 Doubly Robust 等方法进行离线策略评估。
+
+在 LLM 场景中，历史 SFT 数据、偏好数据和旧策略生成数据都可能构成离线数据，但直接把离线偏好数据当作在线 RL 数据使用时，需要注意策略分布偏移。
