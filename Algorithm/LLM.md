@@ -388,38 +388,37 @@ $$
   - **更好的外推性**​：模型能够相对更好地处理比训练时更长的序列，这是固定位置编码难以做到的。
   - **更好的相对位置感知**​：注意力分数天然地包含了相对位置信息，提升了模型对词序关系的理解。
 
-### 激活函数 (Activation Function) 的替换
+### 激活函数 (Activation Function) 的演进
 
-- **原始 Transformer**​：前馈网络 (FFN) 中使用 **ReLU** 激活函数。
-- **LLaMA**​：前馈网络 (FFN) 中使用 **SwiGLU** 激活函数。SwiGLU 是 Swish 激活函数和 GLU（门控线性单元）的一种变体。
-
-$$
-SwiGLU(x)=((xW+b)⊗\sigma(\beta(xW+b)))⊗(xV+c)
-$$
+- **原始 Transformer**：前馈网络 (FFN) 中使用 **ReLU** 激活函数。
+- **现代大语言模型**：GLU 风格的门控 FFN 仍然是主流，常见实现包括 **SwiGLU** 和 **GeGLU**，但不存在适用于所有模型的“唯一最佳激活函数”。具体选择取决于模型架构、训练目标、硬件和参数预算。
+- **LLaMA**：前馈网络使用 **SwiGLU**。它不是单一的点激活函数，而是由两个线性分支、一个 Swish/SiLU 分支和逐元素乘法组成的门控 FFN 结构。
 
 $$
-GeGLU(x)=(xW+b)⊗GELU(xV+c)
+\mathrm{SwiGLU}(x)=((xW+b)\otimes\sigma(\beta(xW+b)))\otimes(xV+c)
 $$
 
 $$
-GELU(x)=(xV+c)⊗\Phi (xV+c)
+\mathrm{GeGLU}(x)=\mathrm{GELU}(xW+b)\otimes(xV+c)
 $$
 
-- W,V 是两个不同的权重矩阵，b,c 是偏置项。
-- ⊗ 是**逐元素相乘**​（Hadamard 积）。
-- σ 是 sigmoid 函数。通常 β=1，因此 $((xW+b)⊗\sigma(\beta(xW+b)))$ 就是对 $(xW+b)$ 应用 Swish 激活函数。
+$$
+\mathrm{GELU}(z)=z\Phi(z)
+$$
 
-**工作原理：​**
+- $W,V$ 是两个不同的权重矩阵，$b,c$ 是偏置项；原始 LLaMA 实现通常不使用偏置，这里保留偏置是为了写出一般形式。
+- $\otimes$ 是**逐元素相乘**（Hadamard 积）。
+- $\sigma$ 是 sigmoid 函数。通常 $\beta=1$，因此 $(xW+b)\otimes\sigma(\beta(xW+b))$ 就是对 $(xW+b)$ 应用 Swish；$\mathrm{SiLU}(z)$ 通常就是 $\mathrm{Swish}_1(z)$。
 
-1. 输入 x 被**两个独立的线性变换**投影到两个空间，得到两个信号。
-2. 其中一个信号 $(xW+b)$ 经过 **Swish** 激活函数，得到 $((xW+b)⊗\sigma(\beta(xW+b)))$。
-3. Swish 分支与另一个线性分支 $(xV+c)$ 进行**逐元素相乘**，形成 GLU 风格的门控和信息筛选效果。注意：Swish 的输出并不严格限制在 0 到 1 之间。
+**工作原理：**
 
-**优势：​**
+1. 输入 $x$ 被两个独立的线性变换投影到两个空间，得到两个信号。
+2. 其中一个信号 $(xW+b)$ 经过 Swish/SiLU 激活。
+3. 激活后的分支与另一个线性分支 $(xV+c)$ 进行逐元素相乘，形成 GLU 风格的门控和信息筛选效果。Swish 的输出并不严格限制在 $0$ 到 $1$ 之间。
 
-- **门控机制**​：门控允许模型更灵活地控制信息流，类似于 LSTM 中的门，可以选择性地传递信息，增强了模型的表达能力和非线性。
-- **性能提升**​：大量实验表明，在 Transformer 的 FFN 层中使用 SwiGLU 替代 ReLU 或 GELU 能带来**显著的性能提升**。
-- **参数增加**​：需要注意的是，因为使用了两个投影矩阵 (W,V)而不是一个，SwiGLU 会使 FFN 层的参数量大约增加 50%。但大家认为这个代价是值得的。
+**参数预算：**
+
+SwiGLU 使用两条输入投影路径，因此在相同中间维度下参数量会增加。实际模型通常会缩小 FFN 中间维度，使总参数量和计算量与普通 FFN 大致可比，而不是简单接受 50% 的参数增长。
 
 ## 多模态模型
 
@@ -1466,20 +1465,22 @@ RoPE 的核心思想是：​**通过旋转操作将绝对位置信息注入到�
 对于位置 $m$ 的查询向量和位置 $n$ 的键向量，RoPE 将 $d$ 维向量按每两个维度为一组进行旋转：
 
 $$
-\begin{pmatrix}
+\begin{bmatrix}
 \tilde{q}_m^{(i)} \\
 \tilde{q}_m^{(i+1)}
-\end{pmatrix}
+\end{bmatrix}
 =
-\begin{pmatrix}
-\cos m\theta_i & -\sin m\theta_i \\
-\sin m\theta_i & \cos m\theta_i
-\end{pmatrix}
-\begin{pmatrix}
+\begin{bmatrix}
+\cos(m\theta_i) & -\sin(m\theta_i) \\
+\sin(m\theta_i) & \cos(m\theta_i)
+\end{bmatrix}
+\begin{bmatrix}
 q_m^{(i)} \\
 q_m^{(i+1)}
-\end{pmatrix}
+\end{bmatrix}
 $$
+
+> GitHub 数学公式中，`$$` 应单独成行，矩阵换行使用 `\\`；不要把数学块写成 `**$$ ... $$**`。
 
 **解释**：
 
@@ -1608,62 +1609,41 @@ $$
 
 ### 激活函数
 
-**基于 GLU (Gated Linear Unit) 的变体，特别是 SwiGLU 和 GeGLU，已经成为大型 Transformer 模型（如 LLaMA、GPT、PaLM）在前馈神经网络 (FFN) 层的默认选择。**
+激活函数与 FFN 结构需要区分：ReLU、GELU、SiLU/Swish 是点激活函数；GLU、SwiGLU、GeGLU 则是带门控的双分支 FFN 结构。当前大模型中，GLU 变体仍很常见，但不能简单概括为所有模型都默认使用同一个激活函数。
 
-1. 为什么不再是 ReLU？
-
-**ReLU (Rectified Linear Unit):** f(x)=max(0,x)
-
-- **优点**​：计算简单，解决了梯度消失问题，加速了模型的收敛。
-- **缺点**​：
-
-  - **​“Dead ReLU”问题**​：一旦输入为负，梯度直接归零，导致神经元“死亡”且无法恢复。
-  - **非零中心**​：输出均值恒大于零，可能影响训练 dynamics。
-  - **表达能力有限**​：只是一个简单的线性变换（对于正区域）。
-
-虽然 ReLU 及其变种（如 **Leaky ReLU**）在 CNN 等模型中依然有效，但在追求极致性能的大模型中已不再是首选。
-
-1. 当前的王者：GLU 及其变体
-
-**GLU (Gated Linear Unit)** 不是一个单一的激活函数，而是一种**结构**。它的核心思想是 **​“门控”​** ，模仿了 LSTM 或 GRU 中的门机制，允许模型学习如何控制信息流。
+#### ReLU：经典基线
 
 $$
-GLU(x)=(xW+b)⊗σ(xV+c)
+\mathrm{ReLU}(x)=\max(0,x)
 $$
 
-- x 是输入。
-- W, V 是权重矩阵，b, c 是偏置。
-- σ 是 sigmoid 函数，输出一个介于 0 到 1 之间的“门”值。
-- ⊗ 是逐元素乘法 (Hadamard product)。
+ReLU 计算简单，但存在“Dead ReLU”、输出非零中心以及负半轴梯度为零等问题，因此在现代大语言模型的 FFN 中通常不是首选；在 CNN 等场景中仍然有价值。
 
-**这个结构如何工作？​**
+#### GLU：门控结构
 
-- `(xW + b)` 是一个**线性变换**，负责提供需要被传递的信息。
-- `σ(xV + c)` 是一个**门控信号**，决定让多少信息通过。
-- 两者相乘，门控信号就像一个“水龙头”，可以精确地控制每个神经元的信息流量。
-
-基于 GLU 结构，两个最流行的变体是：
-
-**A. SwiGLU**
+**GLU (Gated Linear Unit)** 不是单一激活函数，而是一种通过逐元素乘法控制信息流的结构：
 
 $$
-SwiGLU(x)=Swish(xW+b)⊗(xV+c)
+\mathrm{GLU}(x)=(xW+b)\otimes\sigma(xV+c)
 $$
 
-- **特点**​：使用 **Swish** 函数作为主路径的激活。
-- **Swish**​： Swish(x)=x⋅σ(βx)，其中 β 通常为 1。它是一个平滑、非单调的函数
-- **代表模型**​：​**LLaMA 系列、PaLM**。
+其中 $\sigma(xV+c)$ 是 sigmoid 门控分支，输出位于 $[0,1]$；$(xW+b)$ 是信息分支。
 
-**B. GeGLU**
+#### SwiGLU 与 GeGLU：主流变体
 
 $$
-GeGLU(x)=GELU(xW+b)⊗(xV+c)
+\mathrm{SwiGLU}(x)=\mathrm{Swish}(xW+b)\otimes(xV+c)
 $$
 
-- **特点**​：使用 **GELU** 函数作为主路径的激活。
-- **GELU** (Gaussian Error Linear Unit): GELU(x)=x⋅Φ(x)，其中 Φ(x)是标准正态分布的累积分布函数。它可以被理解为“根据输入的概率来随机地开关门”，比 ReLU 更平滑。
-- **代表模型**​：​**T5、GPT-J**。
+$$
+\mathrm{GeGLU}(x)=\mathrm{GELU}(xW+b)\otimes(xV+c)
+$$
 
+- **SwiGLU**：使用平滑、非单调的 Swish/SiLU 分支。
+- **GeGLU**：使用 GELU 分支。
+- 两者都保留了 GLU 的“双分支逐元素相乘”结构。
+
+**近期判断：**SwiGLU/GeGLU 仍是大型 Transformer FFN 的常见方案，但激活函数并没有形成永久不变的“王者”。实际选型还会受到模型家族、MoE/稠密结构、参数预算、量化方案和硬件内核支持的影响。
 ### 矩阵维度变化
 
 #### 通用参数定义
@@ -2152,104 +2132,72 @@ LoRA 核心配置（1B 参数模型）：rank=8（低秩维度），仅训练线
 
 ### Flash Attention
 
-#### Flash Attention 核心创新
+FlashAttention 是注意力层的 **IO-aware kernel/算法优化**，不是一种新的注意力架构。它仍然计算标准的精确 softmax attention，核心目标是减少 GPU HBM 与片上 SRAM 之间的读写，并提高 GPU 利用率。
 
-Flash Attention 的革命性在于 **IO 感知算法设计**，通过三大核心技术突破瓶颈：
+#### 核心机制
 
-#### 1. 分块计算（Tiling/Tile-based Computation）
+1. **分块计算（Tiling）**：将 $Q,K,V$ 按序列和头维度分块，只把当前需要的 tile 放入片上 SRAM。
+2. **在线 Softmax（Online Softmax）**：分块维护每行的 running max 和归一化因子，不物化完整的 $QK^\top$ 注意力矩阵。
+3. **反向传播重计算（Recomputation）**：前向只保存必要统计量，反向时重新计算注意力块，以时间换显存。
+4. **内核融合与硬件流水线**：融合矩阵乘法、Softmax 和输出累积，并针对不同 GPU 架构使用并行切分、异步拷贝、warp specialization 等优化。
 
-将 Q、K、V 矩阵按序列长度分割为固定大小的"瓦片"（Tile，通常 128 或 256 个 token），每次仅将少量瓦片加载到 GPU 的片上 SRAM（快速缓存）中计算，避免同时存储整个矩阵。
+分块降低的是 **HBM IO 和中间注意力矩阵的存储开销**，并没有把标准全注意力的计算复杂度从 $O(N^2)$ 变成线性；注意力的核心矩阵乘法仍然是 $O(N^2)$ 计算。
 
+#### 版本演进
+
+| 版本 | 主要特点 | 典型硬件/状态 |
+| --- | --- | --- |
+| FlashAttention-1 | IO 感知分块、在线 Softmax、反向重计算 | Ampere 等 GPU；2022 年论文 |
+| FlashAttention-2 | 更好的并行化和工作分区，提升长序列吞吐 | Ampere、Ada、Hopper；支持更大 head dimension |
+| FlashAttention-3 | 面向 Hopper 的异步流水线和硬件利用率优化；官方实现包含 FP16/BF16 前向与反向、FP8 前向 | H100/H800；beta/实验性组件 |
+| FlashAttention-4 | 基于 CuTeDSL 的新实现，面向 Hopper 与 Blackwell | H100、B200 等；具体支持随版本和 CUDA 环境变化 |
+
+FlashAttention-3/4 的支持范围、安装方式和性能会随 CUDA、GPU 架构、数据类型及 kernel 后端变化，不能只按版本号判断实际速度。
+
+#### 需要避免的表述
+
+1. **不是近似注意力**：FlashAttention 不使用低秩近似或稀疏近似，但不同 kernel 的浮点舍入结果可能存在微小差异。
+2. **不是无限长上下文方案**：它主要节省 IO 和显存，实际上下文长度仍受模型、KV cache、硬件和服务端调度限制。
+3. **不等于 KV cache 管理**：FlashAttention 优化单次注意力计算；KV cache 分页、复用、调度属于推理运行时的职责。
+
+### LLM 推理部署优化：vLLM 与 SGLang
+
+FlashAttention 解决的是“一个注意力算子如何算得更快”，而 vLLM、SGLang 解决的是“很多请求如何共同运行得更高效”。两者通常会调用 FlashAttention、FlashInfer、Triton 或其他硬件后端，因此不是互相替代关系。
+
+#### vLLM：通用高吞吐推理运行时
+
+vLLM 的核心优化包括：
+
+- **PagedAttention**：将 KV cache 切分成固定大小的 block，减少连续显存分配和碎片，并支持更灵活的批处理。
+- **Continuous Batching**：请求动态进入和退出 batch，提高 GPU 在 prefill/decode 混合负载下的利用率。
+- **Chunked Prefill**：将很长的输入分块预填充，减少长请求对正在 decode 请求的阻塞。
+- **Automatic Prefix Caching**：复用共享前缀的 KV cache，适合多轮对话、RAG 和 agent 工作流。
+- **Speculative Decoding**：使用草稿模型、n-gram 或其他提议器一次提出多个 token，再由目标模型验证。
+- **量化与并行部署**：支持多种权重量化、KV cache 量化，以及 tensor/pipeline/data/expert/context parallelism；还支持 prefill/decode 分离等分布式部署方式。
+- **后端选择**：可根据硬件和模型选择 FlashAttention、FlashInfer、Triton 等 attention/GEMM kernel。
+
+#### SGLang：前缀复用与结构化生成友好的运行时
+
+SGLang 的代表性优化包括：
+
+- **RadixAttention**：用 radix tree 管理并复用共享前缀的 KV cache，适合多轮对话、few-shot、RAG 和 agent 场景。
+- **低开销调度与 Continuous Batching**：减少 CPU 调度开销，并对动态请求进行批处理。
+- **Chunked Prefill 与 Prefill-Decode Disaggregation**：将 prefill 和 decode 拆分到不同实例或资源池，降低长输入对 decode 延迟的影响。
+- **Speculative Decoding、Paged Attention 和多维并行**：支持投机解码，以及 tensor/pipeline/data/expert parallelism。
+- **HiCache**：在 GPU 显存、主机内存和外部存储之间构建分层 KV cache，扩展长上下文和跨请求缓存能力。
+- **量化、多 LoRA 与 kernel 后端**：支持多种量化和多 LoRA batching，并可使用 FlashInfer、FlashAttention、Triton 等后端；具体能力取决于版本、硬件和模型架构。
+
+#### 三者关系
+
+```text
+FlashAttention / FlashInfer / Triton
+        ↓  注意力与矩阵计算 kernel
+vLLM / SGLang
+        ↓  KV cache、调度、批处理、并行、量化、服务 API
+线上推理服务
 ```
-for each tile_Q in Q:
-    load tile_Q from HBM to SRAM
-    for each tile_K, tile_V in K, V:
-        load tile_K, tile_V from HBM to SRAM
-        compute tile_Q × tile_K^T → 局部注意力分数
-        accumulate 局部结果到全局输出
-```
 
-通过分块将 IO 复杂度从 O(N²)降至 O(N)。
-
-#### 2. 在线 Softmax（Online Normalization）
-
-Softmax 操作可分解为三个步骤：
-
-- 计算最大值（max）
-- 计算指数并求和（sum_exp）
-- 归一化（exp(x-max)/sum_exp）
-
-Flash Attention 通过**分块累积 max 和 sum_exp**，避免存储完整的 QK^T 矩阵，实现"边计算边归一化"，这是 Flash Attention 的关键数学突破。
-
-#### 3. 反向传播重计算（Recomputation）
-
-**以时间换空间**的典范：
-
-- 前向传播不存储完整注意力矩阵
-- 反向传播时，从原始 Q、K、V 快速重新计算所需的注意力分数块
-- 节省的显存资源远超额外计算开销，尤其对长序列收益显著
-
-#### 4. 内核融合（Kernel Fusion）
-
-将整个注意力计算流程（QKV 投影 → 分块 → 矩阵乘法 → 在线 Softmax→ 输出）融合为单个 CUDA 内核函数，带来双重优势：
-
-- 减少 GPU 内核启动开销（避免多次 kernel launch）
-- 中间结果完全在寄存器/共享内存中处理，无需写入 HBM
-
-### Flash Attention 算法流程详解
-
-#### 前向传播关键步骤
-
-<table>
-<tr>
-<td>步骤<br/></td><td>操作<br/></td><td>创新点<br/></td></tr>
-<tr>
-<td>1<br/></td><td>QKV分块<br/></td><td>按头维度和序列维度分割为瓦片<br/></td></tr>
-<tr>
-<td>2<br/></td><td>瓦片加载<br/></td><td>逐块将Q、K、V瓦片加载到SRAM<br/></td></tr>
-<tr>
-<td>3<br/></td><td>局部计算<br/></td><td>计算瓦片间注意力分数<br/></td></tr>
-<tr>
-<td>4<br/></td><td>在线归一化<br/></td><td>累积max和sum_exp，实时计算softmax<br/></td></tr>
-<tr>
-<td>5<br/></td><td>结果聚合<br/></td><td>累积局部输出到全局结果<br/></td></tr>
-<tr>
-<td>6<br/></td><td>元数据存储<br/></td><td>仅保存max和sum_exp等必要元数据（O(N)），不存完整注意力矩阵<br/></td></tr>
-</table>
-
-#### 反向传播重计算流程
-
-1. 加载前向保存的元数据（max, sum_exp）
-2. 重新计算所需的注意力分数块
-3. 计算梯度并更新参数
-4. 释放临时计算资源
-
-#### 版本演进：从 FlashAttention-1 到 FlashAttention-3
-
-<table>
-<tr>
-<td>版本<br/></td><td>发布时间<br/></td><td>核心改进<br/></td><td>硬件优化<br/></td><td>性能提升<br/></td></tr>
-<tr>
-<td>FlashAttention-1<br/></td><td>2022年<br/></td><td>分块+在线Softmax+重计算<br/></td><td>Ampere (A100)<br/></td><td>2-4倍速度，10-20倍显存减少<br/></td></tr>
-<tr>
-<td>FlashAttention-2<br/></td><td>2023年<br/></td><td>并行优化+工作分区改进<br/></td><td>支持更大头维度(256)<br/></td><td>额外1.5-2倍速度提升<br/></td></tr>
-<tr>
-<td>FlashAttention-3<br/></td><td>2024年<br/></td><td>KV量化+异步处理<br/></td><td>Hopper (H100/H200)<br/></td><td>更高吞吐量，支持更长序列<br/></td></tr>
-</table>
-
-FlashAttention-3 新增特性：
-
-- KV 缓存块量化（FP8/INT4），进一步节省显存
-- 非一致处理优化，适配动态序列长度
-- 异步 IO 操作，计算与数据加载完全重叠
-
-#### 核心优势
-
-1. **精度无损**：与传统注意力计算结果完全一致，无近似误差
-2. **内存效率**：将注意力计算内存复杂度从 O(N²)降至 O(N)，支持更长序列（最高百万级 token）
-3. **速度提升**：减少 HBM 访问次数，计算单元利用率显著提高
-4. **硬件友好**：充分利用 GPU 片上 SRAM，适配最新 GPU 架构（Ampere→Hopper）
-
+简单区分：单算子性能看 kernel；高并发吞吐看 batching 与 KV cache 管理；长上下文和多轮复用重点看 prefix cache/HiCache；大规模集群还要考虑并行策略和 prefill-decode 分离。
 # LLM Application
 
 ## 知识蒸馏
