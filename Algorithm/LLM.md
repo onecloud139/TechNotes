@@ -74,13 +74,11 @@ $$
 - **缩放点积**​：除以 $\sqrt{d_k}$ 防止点积结果过大导致 Softmax 梯度饱和。
 - **多头注意力**​：将 Q、K、V 投影到多个子空间，并行执行注意力计算后再融合。这使得模型能从**不同表示子空间**联合关注信息，例如同时关注语法结构和语义关系，增强模型表达能力。
 
-1. **位置编码**
-2. 由于自注意力机制本身不包含顺序信息，Transformer 需要通过**位置编码**显式注入序列的顺序。
+1. **位置编码**: 由于自注意力机制本身不包含顺序信息，Transformer 需要通过**位置编码**显式注入序列的顺序。
 
    - 常用正弦余弦函数生成。
    - 这种编码让模型能够学习到**相对位置信息**，例如能够理解“word1 在 word2 之前”这样的关系。
-3. **残差连接与层归一化**
-4. 每个子层（自注意力层、前馈网络）都采用 **残差连接** 和 **层归一化**，即 `Output = LayerNorm(x + Sublayer(x))`。
+3. **残差连接与层归一化**: 每个子层（自注意力层、前馈网络）都采用 **残差连接** 和 **层归一化**，即 `Output = LayerNorm(x + Sublayer(x))`。
 
    - **残差连接**​：将子层输入直接绕过该层加到输出上，确保梯度能有效反向传播，极大缓解了深层网络的梯度消失问题。
    - **层归一化**​：对每个样本的所有特征维度进行归一化，稳定训练过程，加速收敛。
@@ -112,7 +110,7 @@ Transformer 的 Encoder 是一个功能强大的组件，其核心任务是将�
 
 ### 二、分步详解与公式
 
-我们逐步拆解数据在 Encoder 中的流动过程。设序列长度为 $S=seq_len$，模型维度为 $D=d_model$。不考虑 batch 时，隐藏状态形状为 `[S,D]`；带 batch 时为 `[B,S,D]`。
+我们逐步拆解数据在 Encoder 中的流动过程。设序列长度为 $S=seq\_len$，模型维度为 $D=d\_model$。不考虑 batch 时，隐藏状态形状为 `[S,D]`；带 batch 时为 `[B,S,D]`。
 
 #### 步骤 1：输入嵌入与位置编码
 
@@ -188,9 +186,6 @@ $$ Attention(Q,K,V)=softmax(\frac{QK^T}{\sqrt{d_k}})V $$
 -  $EncoderOutput=H_N$
 - 维度： `[seq_len, d_model]`
 
-这个输出是一个丰富的表示矩阵，其中每个行向量都包含了整个输入序列的上下文信息。它可以被送入 Decoder（在原始 Transformer 中用于翻译），或者直接用于各种任务（如文本分类、BERT 等）。
-
-
 ## Decoder
 
 Decoder 的核心任务是：​**以自回归的方式生成输出序列**。所谓"自回归"，是指在生成每个词时，只能看到已经生成的词（以及完整的输入序列信息），然后预测下一个词。
@@ -234,6 +229,7 @@ Decoder 的输入是**目标序列的右移版本**​（Shifted Right）。
 $$
 MaskedAttention(Q,K,V)=softmax(\frac{QK^T}{\sqrt{d_k}}+M)V
 $$
+
 单个头的 $Q,K,V$ 形状为 `[T,d_k]`、`[T,d_k]`、`[T,d_v]`，掩码 $M$ 和注意力分数矩阵形状均为 `[T,T]`；多头 batch 形式的分数矩阵为 `[B,H,T,T]`。
 
 其中 $Q,K,V$ 的投影矩阵形状分别为 `[D,d_k]`、`[D,d_k]`、`[D,d_v]`；多头形式分别为 `[B,H,T,d_k]`、`[B,H,T,d_k]`、`[B,H,T,d_v]`。
@@ -263,6 +259,7 @@ $$
 $$
 CrossAttention(Q,K,V)=softmax(\frac{Q_{dec}K_{enc}^T}{\sqrt{d_k}})V_{enc}
 $$
+
 $Q_{dec}$ 形状为 `[T,d_k]`，$K_{enc}$ 为 `[S,d_k]`，$V_{enc}$ 为 `[S,d_v]`；因此交叉注意力权重形状为 `[T,S]`，输出形状为 `[T,d_v]`，多头 batch 形式为 `[B,H,T,S]`。
 
 
@@ -284,6 +281,7 @@ $$
 $$
 H_{dec}^{l+1}=LayerNorm(Z_2^l+FFN(Z_2^l))
 $$
+
 $Z_2^l$ 形状为 `[T,D]`；FFN 中 $W_1\in[D,d_{ff}]$，中间激活为 `[T,d_{ff}]`，$W_2\in[d_{ff},D]$，最终输出和残差结果均为 `[T,D]`（带 batch 时为 `[B,T,D]`）。
 
 
@@ -332,7 +330,7 @@ $$
 设每个头维护状态 $S_t \in \mathbb{R}^{d_k \times d_v}$，$\alpha_t$ 是通道级遗忘门，$\beta_t$ 是写入步长，则其递推可写为：
 
 $$
-S_t = (I - \beta_t k_t k_t^\top)\operatorname{Diag}(\alpha_t)S_{t-1} + \beta_t k_t v_t^\top,
+S_t = (I - \beta_t k_t k_t^\top) Diag(\alpha_t)S_{t-1} + \beta_t k_t v_t^\top,
 \qquad o_t = S_t^\top q_t
 $$
 
@@ -344,7 +342,7 @@ $$
 
 ### 稀疏注意力（Sparse Attention）
 
-稀疏注意力通过**限制每个 token 的注意力范围**，只计算最关键的连接，避免全序列交互。常见方法包括滑动窗口、全局 token 和随机采样.稀疏注意力没有统一公式，而是通过**掩码矩阵** M 实现：
+稀疏注意力通过**限制每个 token 的注意力范围**，只计算最关键的连接，避免全序列交互。常见方法包括滑动窗口、全局 token 和随机采样：
 
 $$
 SparseAttention(Q,K,V)=softmax(\frac{1}{d_k}QK^T+M)V
@@ -394,7 +392,7 @@ FlashAttention 是注意力层的 **IO-aware kernel/算法优化**，不是一�
 FlashAttention **不改变注意力的数学结果**，仍然计算：
 
 $$
-S=\frac{QK^\top}{\sqrt{d_k}},\qquad P=\operatorname{softmax}(S),\qquad O=PV
+S=\frac{QK^\top}{\sqrt{d_k}},\qquad P=\mathrm{softmax}(S),\qquad O=PV
 $$
 
 其中 $Q\in[B,H,S_q,d_k]$，$K\in[B,H,S_k,d_k]$，$V\in[B,H,S_k,d_v]$；$S,P\in[B,H,S_q,S_k]$，$O\in[B,H,S_q,d_v]$。FlashAttention 的关键是**不把完整的 $S$ 或 $P$ 写回 HBM**。
@@ -402,7 +400,7 @@ $$
 将 $Q$、$K$、$V$ 切成 tile 后，对某一行块维护 running max $m$、归一化因子 $\ell$ 和未归一化输出 $u$。处理新的分数块 $S_{ij}$ 时，可用 online Softmax 更新：
 
 $$
-m_{new}=\max(m_{old},\operatorname{rowmax}(S_{ij}))
+m_{new}=\max(m_{old},\mathrm{rowmax}(S_{ij}))
 $$
 
 $$
@@ -438,7 +436,8 @@ $$
 FlashAttention 解决的是“一个注意力算子如何算得更快”，而 vLLM、SGLang 解决的是“很多请求如何共同运行得更高效”。两者通常会调用 FlashAttention、FlashInfer、Triton 或其他硬件后端，因此不是互相替代关系。
 
 
-#### PagedAttention：分页 KV Cache 的数学形式
+#### vLLM：通用高吞吐推理运行时
+##### PagedAttention：分页 KV Cache 的数学形式
 
 PagedAttention 不是新的注意力函数，也不只是调度器；它改变的是 **KV cache 的物理存储和访问方式**，而注意力结果仍等价于标准 attention。
 
@@ -452,22 +451,21 @@ $$
 
 
 $$
-K_{t,h,:}=K_{cache}[\operatorname{block\_table}[r,block(t)],offset(t),h,:],\qquad
-V_{t,h,:}=V_{cache}[\operatorname{block\_table}[r,block(t)],offset(t),h,:]
+K_{t,h,:}=K_{cache}[\mathrm{block\_table}[r,block(t)],offset(t),h,:],\qquad
+V_{t,h,:}=V_{cache}[\mathrm{block\_table}[r,block(t)],offset(t),h,:]
 $$
 
 因此，第 $r$ 个请求、第 $h$ 个头的输出仍为：
 
 $$
-o_{r,h}=\sum_{t=0}^{L_r-1}\operatorname{softmax}_t\left(\frac{q_{r,h}k_{r,t,h,:}^{\top}}{\sqrt{d_k}}\right)v_{r,t,h,:}
+o_{r,h}=\sum_{t=0}^{L_r-1}\mathrm{softmax}_t\left(\frac{q_{r,h}k_{r,t,h,:}^{\top}}{\sqrt{d_k}}\right)v_{r,t,h,:}
 $$
 
 变化在于：逻辑上连续的 KV 序列可以分散存放在不连续的物理 block 中，`block_table` 负责地址映射。这样可以减少显存碎片、支持动态 batch，并便于复用和回收 KV block；它不会把 attention 的核心点积计算从二次复杂度变成线性。
 
 可以把三类优化区分为：FlashAttention 是注意力算子的 IO/kernel 优化；PagedAttention 是 KV cache 的分页存储与地址映射；Continuous Batching、Chunked Prefill 等才主要属于请求级调度优化。上面的 PagedAttention 公式是概念级索引表达，具体 block 布局和 kernel 实现会随框架版本变化。
-#### vLLM：通用高吞吐推理运行时
 
-vLLM 的核心优化包括：
+vLLM 还提供以下推理优化：
 
 - **PagedAttention**：将 KV cache 切分成固定大小的 block，减少连续显存分配和碎片，并支持更灵活的批处理。
 - **Continuous Batching**：请求动态进入和退出 batch，提高 GPU 在 prefill/decode 混合负载下的利用率。
@@ -753,7 +751,7 @@ $$
 对于矩阵参数 $W$，可以把其核心过程概括为：
 
 $$
-B_t = \mu B_{t-1} + (1-\mu)\nabla_W L, \qquad \Delta W_t = \operatorname{Orthogonalize}(B_t)
+B_t = \mu B_{t-1} + (1-\mu)\nabla_W L, \qquad \Delta W_t = \mathrm{Orthogonalize}(B_t)
 $$
 
 $$
@@ -3558,7 +3556,7 @@ $$
 -\mathbb E_t\left[
 \min\left(
 \rho_t\hat A_t,\
-\operatorname{clip}(\rho_t,1-\epsilon,1+\epsilon)\hat A_t
+\mathrm{clip}(\rho_t,1-\epsilon,1+\epsilon)\hat A_t
 \right)\right],
 \qquad
 \rho_t=\frac{\pi_\theta(a_t\mid s_t)}
