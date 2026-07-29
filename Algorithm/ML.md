@@ -3140,35 +3140,75 @@ $$
 =-\mathbb E_\tau\left[\sum_t\gamma^t\log\pi_\theta(a_t\mid s_t)G_t\right]
 $$
 
-### 5. PPO：GAE 优势估计与裁剪更新
+### 5. PPO：从策略梯度到裁剪 surrogate
 
-PPO 中常用 GAE 以多步 TD 误差估计优势：
-
-$$
-\hat A_t^{GAE(\gamma,\lambda)}
-=\sum_{l=0}^{T-t-1}(\gamma\lambda)^l\delta_{t+l}
-$$
-
-PPO 使用新旧策略的概率比：
+PPO 是 on-policy 的 Actor-Critic 方法。它并不是另起一个优化目标，而是把前面通用的优势策略梯度，改写为可在一批旧策略数据上重复优化的局部 surrogate。通用策略梯度用采样优势估计时，可写成：
 
 $$
-r_t(\theta)
-=\frac{\pi_\theta(a_t|s_t)}{\pi_{old}(a_t|s_t)}
-=\exp\left(\log\pi_\theta-\log\pi_{old}\right)
-$$
-
-裁剪目标：
-
-$$
-\mathcal L_{PPO}^{clip}
-=\mathbb E\left[
-\min\left(r_t\hat A_t,
-\mathrm{clip}(r_t,1-\epsilon,1+\epsilon)\hat A_t\right)
+\nabla_\theta J(\theta)
+\approx\mathbb E_{t\sim\mathcal D_{\pi_\theta}}
+\left[
+\nabla_\theta\log\pi_\theta(a_t\mid s_t)\hat A_t
 \right]
 $$
 
-实现关键：保存 old log probability；对同一批 rollout 做有限轮 minibatch 更新；监控 approximate KL、clip fraction、entropy、value loss 和梯度范数。
+这里采用状态采样分布的记法，因此前面轨迹级推导中的 $\gamma^t$ 已吸收到分布权重中。采样一批数据后，PPO 固定行为策略为 $\pi_{old}$，得到数据集 $\mathcal D_{old}$ 和优势估计 $\hat A_t$；随后只改变 $\theta$。对于同一个已采样状态 $s_t$，用重要性比率将动作分布从旧策略改写到新策略：
 
+$$
+r_t(\theta)
+=\frac{\pi_\theta(a_t\mid s_t)}{\pi_{old}(a_t\mid s_t)}
+=\exp\left(
+\log\pi_\theta(a_t\mid s_t)
+-\log\pi_{old}(a_t\mid s_t)
+\right)
+$$
+
+因此得到未裁剪的 surrogate：
+
+$$
+\mathcal L^{PG}(\theta)
+=\mathbb E_{t\sim\mathcal D_{old}}
+\left[
+r_t(\theta)\,\mathrm{stopgrad}(\hat A_t)
+\right]
+$$
+
+在更新起点 $\theta=\theta_{old}$ 时，$r_t=1$，且：
+
+$$
+\left.\nabla_\theta\mathcal L^{PG}(\theta)\right|_{\theta=\theta_{old}}
+=
+\mathbb E_{t\sim\mathcal D_{old}}
+\left[
+\nabla_\theta\log\pi_\theta(a_t\mid s_t)
+\,\hat A_t
+\right]_{\theta=\theta_{old}}.
+$$
+
+这正是通用优势策略梯度的采样估计。问题在于：若对同一批数据进行很多步更新，$r_t$ 可以偏离 1 很远，旧数据对应的状态分布和旧优势估计会逐渐不再适合新策略。PPO 因而不允许某个样本借由极端概率比获得无限大的改进。
+
+裁剪目标为：
+
+$$
+\mathcal L_{PPO}^{clip}
+=\mathbb E_{t\sim\mathcal D_{old}}\left[
+\min\left(
+r_t(\theta)\hat A_t,
+\mathrm{clip}(r_t(\theta),1-\epsilon,1+\epsilon)\hat A_t
+\right)
+\right].
+$$
+
+当 $\hat A_t>0$ 时，它阻止 $r_t$ 超过 $1+\epsilon$ 后继续因增大该动作概率而获益；当 $\hat A_t<0$ 时，它阻止 $r_t$ 低于 $1-\epsilon$ 后继续因减小该动作概率而获益。因而它近似限制单次策略更新幅度，而不必显式求解带 KL 约束的优化问题。这里的 $\mathcal L_{PPO}^{clip}$ 是**要最大化的目标**；代码中通常最小化它的相反数，并加上 Critic value loss 与可选的 entropy bonus。
+
+上式仍需要构造 $\hat A_t$。PPO 中常用 GAE，将多步 TD 误差加权为优势估计：
+
+$$
+\hat A_t^{GAE(\gamma,\lambda)}
+=\sum_{l=0}^{T-t-1}(\gamma\lambda)^l\delta_{t+l}.
+$$
+
+实现流程是：用 $\pi_{old}$ rollout 并保存 old log probability，使用 Critic 计算 $\delta_t$、GAE 和 value target；固定这些 target，对同一批 rollout 做有限轮 minibatch 的裁剪策略更新与 Critic 更新；最后令 $\pi_{old}\leftarrow\pi_\theta$ 后重新采样。常监控 approximate KL、clip fraction、entropy、value loss 和梯度范数。
 ### 6. 其他常见算法
 
 | 算法 | 核心思想 | 适用场景 |
