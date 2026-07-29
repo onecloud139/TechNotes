@@ -2754,414 +2754,429 @@ FID 越低通常表示生成分布越接近真实分布，但仍会受到特征�
 
 # 强化学习基础
 
+## Notations
 
+### 1. 基础符号
 
-## 第一部分：理论基础
-
-### 1. 强化学习问题与 MDP
-
-[强化学习](https://web.stanford.edu/class/cs234/modules.html)研究智能体如何与环境交互，通过试错最大化长期累积奖励。标准马尔可夫决策过程（MDP）表示为：
+强化学习中，Agent 在状态 $s_t$ 下按策略选择动作 $a_t$，环境返回奖励 $r_t$ 与下一状态 $s_{t+1}$：
 
 $$
-\mathcal{M}=(\mathcal{S},\mathcal{A},P,R,\gamma)
+s_t\xrightarrow{\pi(a_t|s_t)}a_t
+\xrightarrow{P,R}(r_t,s_{t+1})
 $$
 
-- $\mathcal{S}$：状态空间。
-- $\mathcal{A}$：动作空间。
-- $P(s'|s,a)$：状态转移概率。
-- $R(s,a)$ 或 $R(s,a,s')$：即时奖励。
-- $\gamma\in[0,1)$：折扣因子。
-- $\pi_\theta(a|s)$：参数化策略，表示在状态 $s$ 下选择动作 $a$ 的概率。
+| 符号 | 含义 |
+| --- | --- |
+| $s_t\in\mathcal S$ | 状态；用于决定未来转移和奖励的信息 |
+| $o_t$ | Agent 实际观察到的信息；完全时取 $o_t=s_t$ |
+| $a_t\in\mathcal A$ | 当前动作 |
+| $r_t$ | 一次交互实际采样到的即时奖励 |
+| $\pi(a\mid s)$ | 随机策略，即状态到动作概率分布 |
+| $P(s'\mid s,a)$ | 转移概率 |
+| $R(s,a)=\mathbb E[r_t\mid s_t=s,a_t=a]$ | 期望即时奖励 |
+| $\gamma\in[0,1)$ | 折扣因子 |
 
-在时间 $t$，智能体观察 $s_t$，按照策略采样 $a_t$，获得 $r_{t+1}$，环境转移到 $s_{t+1}$。轨迹可以写为：
-
-$$
-\tau=(s_0,a_0,r_1,s_1,a_1,r_2,\ldots)
-$$
-
-“马尔可夫”表示给定当前状态后，下一状态与奖励不再依赖更早的历史。若观测不能完整表示环境状态，则更准确的建模是部分可观测 MDP（POMDP），此时智能体通常需要根据历史观测形成信念状态或使用记忆模型。
-
-### 2. 回报、价值函数与优势函数
-
-从时刻 $t$ 开始的折扣回报为：
+标准 MDP 写为：
 
 $$
-G_t=\sum_{k=0}^{\infty}\gamma^k r_{t+k+1}
+\mathcal M=(\mathcal S,\mathcal A,P,R,\gamma)
 $$
 
-有限回合在终止时刻 $T$ 结束：
+马尔可夫性质表示，给定当前状态和动作后，下一状态与奖励不依赖更早历史：
 
 $$
-G_t=\sum_{k=0}^{T-t-1}\gamma^k r_{t+k+1}
+P(s_{t+1},r_t|s_0,a_0,\ldots,s_t,a_t)
+=P(s_{t+1},r_t|s_t,a_t)
 $$
 
-策略价值函数和动作价值函数分别为：
+若 Agent 只能看到局部观测，则为 POMDP；实践中常将历史或记忆网络的输出作为 Agent state。模型 $P,R$ 已知时可进行 planning；未知时从交互样本学习，称为 model-free RL。一条轨迹记为：
 
 $$
-V^\pi(s)=\mathbb{E}_\pi[G_t|s_t=s]
+\tau=(s_0,a_0,r_0,s_1,a_1,r_1,\ldots)
+$$
+
+### 2. Return、Value 与 Advantage
+
+从时刻 $t$ 开始的折扣回报：
+
+$$
+G_t=\sum_{k=0}^{\infty}\gamma^k r_{t+k}
+$$
+
+有限回合在终止时刻 $T$ 截断：
+
+$$
+G_t=\sum_{k=0}^{T-t-1}\gamma^k r_{t+k}
+$$
+
+给定策略 $\pi$：
+
+$$
+V^\pi(s)=\mathbb E_\pi[G_t\mid s_t=s]
+=\sum_a\pi(a\mid s)
+\left[R(s,a)+\gamma\sum_{s'}P(s'\mid s,a)V^\pi(s')\right]
 $$
 
 $$
-Q^\pi(s,a)=\mathbb{E}_\pi[G_t|s_t=s,a_t=a]
+Q^\pi(s,a)=\mathbb E_\pi[G_t\mid s_t=s,a_t=a]
+=R(s,a)+\gamma\sum_{s'}P(s'\mid s,a)V^\pi(s')
 $$
-
-优势函数衡量动作相对当前策略平均水平的好坏：
 
 $$
 A^\pi(s,a)=Q^\pi(s,a)-V^\pi(s)
 $$
 
-策略熵为：
+## Optimization
+
+### 1. Bellman 方程
+
+贝尔曼期望方程：
 
 $$
-\mathcal{H}(\pi(\cdot|s))=-\sum_a\pi(a|s)\log\pi(a|s)
+V^\pi(s)=\sum_a\pi(a\mid s)
+\left[R(s,a)+\gamma\sum_{s'}P(s'\mid s,a)V^\pi(s')\right]
 $$
 
-熵越大，策略越分散；熵正则常用于鼓励探索。
-
-### 3. 贝尔曼方程与价值估计
-
-贝尔曼期望方程为：
+贝尔曼最优方程：
 
 $$
-V^\pi(s)=\sum_a\pi(a|s)\sum_{s'}P(s'|s,a)
-\left[R(s,a,s')+\gamma V^\pi(s')\right]
-$$
-
-贝尔曼最优方程为：
-
-$$
-V^*(s)=\max_a\sum_{s'}P(s'|s,a)
-\left[R(s,a,s')+\gamma V^*(s')\right]
+V^*(s)=\max_a
+\left[R(s,a)+\gamma\sum_{s'}P(s'\mid s,a)V^*(s')\right]
 $$
 
 $$
-Q^*(s,a)=\sum_{s'}P(s'|s,a)
-\left[R(s,a,s')+\gamma\max_{a'}Q^*(s',a')\right]
+Q^*(s,a)=R(s,a)
++\gamma\sum_{s'}P(s'\mid s,a)\max_{a'}Q^*(s',a')
 $$
 
-时序差分误差（TD Error）为：
+策略评估：固定 $\pi$，估计 $V^\pi$ 或 $Q^\pi$。策略改进：根据当前价值函数更新策略：
 
 $$
-\delta_t=r_{t+1}+\gamma(1-d_t)V_\phi(s_{t+1})-V_\phi(s_t)
+\pi_{new}(s)=\arg\max_a Q^\pi(s,a)
 $$
 
-其中 $d_t$ 表示当前转移是否终止。TD 误差既可以作为 Critic 的学习信号，也可以作为优势估计的基本单元。
+不断交替进行评估与改进，称为广义策略迭代（GPI）。价值迭代、Q-Learning、Actor-Critic 都可理解为 GPI 的不同近似形式。
 
-### 4. DP、MC 与 TD：三种估计思路
+### 2. MC、TD 与 n-step Return
 
-| 方法 | 是否需要环境模型 | 是否等待回合结束 | 是否使用 bootstrap | 特点 |
-| --- | --- | --- | --- | --- |
-| 动态规划（DP） | 需要 | 不需要 | 是 | 适合已知小规模环境 |
-| 蒙特卡洛（MC） | 不需要 | 通常需要 | 否 | 无 bootstrap 偏差，但方差大 |
-| 时序差分（TD） | 不需要 | 不需要 | 是 | 可在线更新，偏差与方差折中 |
-
-动态规划的价值迭代为：
+这一节只讨论一件事：在不知道真实 $V^\pi(s_t)$ 时，如何构造一个训练目标 $y_t$ 来更新它.  $V(s_t)$ 是当前对状态价值的估计，通常可初始化为 0 或任意值；$y_t$ 是本次构造的训练 target，$\alpha$ 是学习率：
 
 $$
-V_{k+1}(s)=\max_a\sum_{s'}P(s'|s,a)
-\left[R(s,a,s')+\gamma V_k(s')\right]
+V_{new}(s_t)=(1-\alpha)V_{old}(s_t)+\alpha y_t
 $$
 
-蒙特卡洛增量更新为：
+即把旧估计朝 target 移动一小步。在表格型 RL 中直接更新这个状态对应的数值；在深度 RL 中，$V_\phi(s_t)$ 由神经网络输出，通常最小化：
 
 $$
-V(s)\leftarrow V(s)+\alpha\left(G_t-V(s)\right)
+\mathcal L_V(\phi)=\left(V_\phi(s_t)-y_t\right)^2
 $$
 
-TD(0) 更新为：
+通过更新参数 $\phi$ 让预测值接近 target。这种用估计值替代未知未来回报的做法称为 bootstrap。
+
+#### Monte Carlo：看到回合结束再更新
+
+MC 等待当前回合结束，直接使用完整采样回报：
 
 $$
-V(s_t)\leftarrow V(s_t)+\alpha
-\left[r_{t+1}+\gamma V(s_{t+1})-V(s_t)\right]
+y_t^{MC}=G_t=\sum_{k=0}^{T-t-1}\gamma^k r_{t+k}
 $$
 
-### 5. 策略梯度、REINFORCE 与 Actor-Critic
-
-直接优化策略的期望回报：
-
 $$
-J(\theta)=\mathbb{E}_{\tau\sim\pi_\theta}
-\left[\sum_t r_{t+1}\right]
+V(s_t) \leftarrow V(s_t)+\alpha\left[G_t-V(s_t)\right]
 $$
 
-策略梯度定理给出：
+这里的 $\alpha$ 是**步长（step size）**。经典表格型 MC 通常令 $\alpha=1/N(s)$，其中 $N(s)$ 是状态 $s$ 截至当前已参与更新的回报样本数。第 $N$ 次样本回报记为 $G^{(N)}(s)$ 时：
+
+$$
+V_N(s)=V_{N-1}(s)+\frac{1}{N}\left[G^{(N)}(s)-V_{N-1}(s)\right]
+=\frac{1}{N}\sum_{i=1}^{N}G^{(i)}(s)
+$$
+
+因此，首次访问某个状态时 $N(s)=1$、$\alpha=1$，得到 $V(s)=G$；后续访问时则把新的完整回报与历史回报做增量平均。First-visit MC 每个状态每回合只计第一次出现，Every-visit MC 则每次出现都计入样本。若使用固定 $\alpha$，更新变为对近期回报权重更高的指数移动平均，适合非平稳环境，但不再是严格的样本均值。
+它完全不使用 $V$ 去猜未来，因此没有 bootstrap 偏差；代价是必须等到终点，且整段随机奖励都会进入 target，方差较大。
+
+#### TD(0)：只看一步就更新
+
+TD 是 **Temporal Difference（时序差分）** 的缩写。按本章的转移记号：
+
+$$
+(s_t,a_t)\longrightarrow(r_t,s_{t+1},d_t)
+$$
+
+其中 $d_t=1$ 表示执行 $a_t$ 后任务已经终止，因此后续没有未来价值，bootstrap 项必须为 0。
+
+TD(0) 只采样一步真实奖励，之后立即用下一状态价值估计未来：
+
+$$
+y_t^{TD(0)}=r_t+\gamma(1-d_t)V(s_{t+1})
+$$
+
+$$
+\delta_t=y_t^{TD(0)}-V(s_t)
+=r_t+\gamma(1-d_t)V(s_{t+1})-V(s_t)
+$$
+
+$$
+V(s_t)\leftarrow V(s_t)+\alpha\delta_t
+$$
+
+因此 TD(0) 不需要等待回合结束，能在线学习；但 $V(s_{t+1})$ 是当前模型自己的估计，估计不准时会把误差带入 target。
+
+#### n-step TD：在两者之间折中
+
+n-step TD 先使用未来 $n$ 步的真实奖励，再从第 $n$ 步开始 bootstrap：
+
+$$
+y_t^{(n)}=G_t^{(n)}
+=\sum_{k=0}^{n-1}\gamma^k r_{t+k}
++\gamma^n(1-d_{t+n-1})V(s_{t+n})
+$$
+
+例如 $n=3$：
+
+$$
+G_t^{(3)}=r_t+\gamma r_{t+1}+\gamma^2r_{t+2}
++\gamma^3(1-d_{t+2})V(s_{t+3})
+$$
+
+这里 $d_{t+2}$ 对应第三次转移：$(s_{t+2},a_{t+2})\rightarrow(r_{t+2},s_{t+3},d_{t+2})$。若 $d_{t+2}=1$，说明第三步后已终止，最后的 $V(s_{t+3})$ 不应参与 target。
+
+关系是：
+
+- $n=1$ 时，$G_t^{(1)}$ 就是 TD(0) target；
+- $n$ 增大时，使用更多真实奖励，逐渐接近 MC；
+- 如果 $n$ 一直延伸到终点，bootstrap 项消失，得到 MC return。
+
+
+### 3. 策略优化目标与策略梯度
+
+价值方法先估计 $V/Q$，再据此选动作；策略梯度则直接优化参数化策略 $\pi_\theta(a|s)$。目标是最大化从初始状态开始的期望回报：
+
+$$
+J(\theta)=\mathbb E_{\tau\sim\pi_\theta}[G_0]
+$$
+
+将一条轨迹的累计回报记为 $G(\tau)=G_0=\sum_{t=0}^{T-1}\gamma^t r_t$；它依赖整条轨迹。于是：
+
+$$
+J(\theta)=\sum_{\tau}p_\theta(\tau)G(\tau)
+$$
+
+环境转移概率不依赖策略参数 $\theta$，所以轨迹概率可以写为：
+
+$$
+p_\theta(\tau)
+=\rho_0(s_0)\prod_{t=0}^{T-1}
+\pi_\theta(a_t|s_t)P(s_{t+1}|s_t,a_t)
+$$
+
+$$
+\log p_\theta(\tau)
+=\log\rho_0(s_0)
++\sum_{t=0}^{T-1}\log\pi_\theta(a_t|s_t)
++\sum_{t=0}^{T-1}\log P(s_{t+1}|s_t,a_t)
+$$
+
+$$
+\nabla_\theta\log p_\theta(\tau)
+=\sum_{t=0}^{T-1}\nabla_\theta
+\log\pi_\theta(a_t|s_t), \nabla_\theta p_\theta(\tau)
+=p_\theta(\tau)\nabla_\theta\log p_\theta(\tau)
+$$
 
 $$
 \nabla_\theta J(\theta)
-=\mathbb{E}_{\pi_\theta}
-\left[\nabla_\theta\log\pi_\theta(a_t|s_t)Q^\pi(s_t,a_t)\right]
+=\sum_\tau p_\theta(\tau)G(\tau)\nabla_\theta\log p_\theta(\tau)
+=\mathbb E_\tau\left[
+G(\tau)\sum_t\nabla_\theta\log\pi_\theta(a_t\mid s_t)
+\right]
 $$
 
-REINFORCE 直接用采样回报估计 $Q$：
+将总回报按时刻 $t$ 拆开：
 
 $$
-\nabla_\theta J(\theta)\approx
-\frac{1}{N}\sum_{i,t}
-\nabla_\theta\log\pi_\theta(a_t^i|s_t^i)G_t^i
+G(\tau)
+=\underbrace{\sum_{k=0}^{t-1}\gamma^k r_k}_{\text{动作 }a_t\text{ 之前的奖励}}
++\gamma^t G_t
 $$
 
-为了降低方差，通常减去不改变期望的 baseline，使用优势函数：
+前半部分奖励在选择 $a_t$ 前已经发生，不依赖 $a_t$。令 $h_t=(s_0,a_0,r_0,\ldots,s_t)$ 表示选择 $a_t$ 前的历史，且 $C_t=\sum_{k=0}^{t-1}\gamma^k r_k$。条件于 $h_t$ 后，$C_t$ 已是常数：
 
 $$
-\nabla_\theta J(\theta)\approx
-\mathbb{E}\left[\nabla_\theta\log\pi_\theta(a_t|s_t)\hat A_t\right]
+\begin{aligned}
+&\mathbb E_{a_t\sim\pi_\theta(\cdot\mid s_t)}
+\left[\nabla_\theta\log\pi_\theta(a_t\mid s_t)C_t\mid h_t\right]\\
+={}&C_t\sum_a\pi_\theta(a\mid s_t)\nabla_\theta\log\pi_\theta(a\mid s_t)\\
+={}&C_t\sum_a\nabla_\theta\pi_\theta(a\mid s_t)\\
+={}&C_t\nabla_\theta\sum_a\pi_\theta(a\mid s_t)\\
+={}&C_t\nabla_\theta 1=0.
+\end{aligned}
 $$
 
-Actor-Critic 中，Actor 更新策略，Critic 学习 $V_\phi$ 或 $Q_\phi$：
-
 $$
-\mathcal{L}_{actor}
-=-\mathbb{E}\left[\log\pi_\theta(a_t|s_t)\hat A_t\right]
-$$
-
-$$
-\mathcal{L}_{critic}
-=\mathbb{E}\left[(V_\phi(s_t)-\hat V_t^{target})^2\right]
+\mathbb E_{a_t\sim\pi_\theta}
+\left[
+\nabla_\theta\log\pi_\theta(a_t\mid s_t) \cdot
+\sum_{k=0}^{t-1}\gamma^k r_k
+\right]=0
 $$
 
-### 6. On-policy、Off-policy 与探索
-
-- **On-policy**：使用当前策略采样的数据更新当前策略，例如 REINFORCE、A2C、PPO。数据通常不能长期复用。
-- **Off-policy**：可以使用旧策略或行为策略采样的数据，例如 Q-Learning、DQN、SAC。样本可以存入 Replay Buffer 重复利用。
-- **探索**：通过 $\epsilon$-greedy、策略熵、参数噪声或 UCB 等方法在探索新动作和利用当前最优动作之间折中。
-
-
-### 7. 策略评估、策略改进与广义策略迭代
-
-给定一个固定策略 $\pi$，策略评估的目标是求解它的价值函数。迭代形式的贝尔曼期望更新为：
+所以可以将整条轨迹回报替换为从当前时刻开始的 reward-to-go：
 
 $$
-V_{k+1}^{\pi}(s)
-=\sum_a\pi(a|s)\sum_{s'}P(s'|s,a)
-\left[R(s,a,s')+\gamma V_k^{\pi}(s')\right]
+\nabla_\theta J(\theta)
+=\mathbb E_\tau\left[
+\sum_t\gamma^t\nabla_\theta\log\pi_\theta(a_t\mid s_t)G_t
+\right]
 $$
 
-策略改进则根据当前价值函数选择更优动作：
+若使用未折扣回报（$\gamma=1$），该 $\gamma^t$ 因子消失；若改用 discounted state-visitation distribution 表示期望，也常将它吸收到采样分布中。
+
+#### Baseline 与 Advantage
+
+再减去任意只依赖状态的 baseline $b(s_t)$，仍不改变梯度期望：
 
 $$
-\pi_{new}(s)=\arg\max_a Q^{\pi}(s,a)
+\mathbb E_{a_t\sim\pi_\theta}
+\left[\nabla_\theta\log\pi_\theta(a_t\mid s_t)b(s_t)\right]
+=b(s_t)\nabla_\theta\sum_a\pi_\theta(a\mid s_t)=0
 $$
 
-策略改进定理说明，在适当条件下，贪心改进得到的策略不会比原策略差：
+取 $b(s_t)=V^\pi(s_t)$，得到优势形式：
 
 $$
-V^{\pi_{new}}(s)\ge V^{\pi}(s),\qquad \forall s
+\nabla_\theta J(\theta)
+=\mathbb E_\tau\left[
+\sum_t\gamma^t\nabla_\theta\log\pi_\theta(a_t\mid s_t)A^\pi(s_t,a_t)
+\right]
 $$
 
-**广义策略迭代（GPI）**不断交替执行策略评估和策略改进：
+实际训练中用估计优势 $\hat A_t$ 代替真实优势。$\hat A_t>0$ 时提高该动作概率，$\hat A_t<0$ 时降低该动作概率。
 
-1. 固定策略，估计 $V^\pi$ 或 $Q^\pi$。
-2. 根据价值估计改进策略。
-3. 重复以上过程直到策略或价值函数收敛。
+#### Actor-Critic
 
-策略迭代完整地执行策略评估，价值迭代则把评估和改进合并到一次最优性更新中。Actor-Critic 也可以看成 GPI 的近似形式：Critic 不完全求解价值函数，Actor 根据不精确的价值信号逐步改进策略。
-
-### 8. n-step Return 与偏差—方差权衡
-
-一步 TD 目标依赖短期奖励和价值函数估计，Monte Carlo 目标则等待完整回合。二者之间可以用 n-step return 连接：
+Actor 是策略 $\pi_\theta$，Critic 用 $V_\phi(s)$ 估计 baseline 和未来回报。常用损失为：
 
 $$
-G_t^{(n)}
-=\sum_{k=0}^{n-1}\gamma^k r_{t+k+1}
-+\gamma^n V(s_{t+n})
+\mathcal L_{actor}
+=-\mathbb E_\tau\left[
+\sum_t\gamma^t\log\pi_\theta(a_t\mid s_t)\,\mathrm{stopgrad}(\hat A_t)
+\right]
 $$
 
-$n$ 较小时，目标更依赖 bootstrap，方差较低但偏差可能较大；$n$ 较大时，更接近真实回报，偏差较低但方差可能增大。TD($\lambda$) 用不同步长的回报加权：
-
 $$
-G_t^{\lambda}
-=(1-\lambda)\sum_{n=1}^{\infty}
-\lambda^{n-1}G_t^{(n)}
+\hat V_t=\hat A_t+V_\phi(s_t),\qquad
+\mathcal L_{critic}
+=\mathbb E\left[(V_\phi(s_t)-\hat V_t)^2\right]
 $$
 
-GAE 正是把这种思想应用到优势函数估计中。理解 $n$ 或 $\lambda$ 的作用，比死记某个默认超参数更重要。
+其中 $\mathrm{stopgrad}$ 表示计算 Actor loss 时不对优势估计反向传播。这里的 Actor-Critic 只是通用分工：Actor 负责改变动作分布，Critic 负责提供回报或优势的估计；具体的损失构造与更新约束由下方各算法决定。
 
-### 9. Bellman 算子的收缩性与收敛直觉
+## Algorithm
 
-定义策略的 Bellman 算子：
+### 1. 从通用理论到算法：四个设计选择
 
-$$
-(T^\pi V)(s)
-=\sum_a\pi(a|s)\sum_{s'}P(s'|s,a)
-\left[R(s,a,s')+\gamma V(s')\right]
-$$
+上节的策略梯度给出的是一个通用方向：用采样到的回报或优势，调整动作概率；Bellman 方程给出的是另一条路径：先让价值估计满足递推关系，再据此选动作。具体算法的差别，主要来自下面四个选择：
 
-当 $0\le\gamma<1$ 时，Bellman 期望算子在无穷范数下是压缩映射：
+| 设计问题 | 常见选择 | 对应影响 |
+| --- | --- | --- |
+| 优化什么 | 直接优化 $\pi_\theta$；或先学习 $Q/V$ | 前者走策略梯度，后者走价值方法 |
+| 用什么训练信号 | 完整回报 $G_t$、TD target、n-step return、优势 $\hat A_t$ | 决定 bootstrap 程度，以及偏差—方差权衡 |
+| 数据从哪里来 | 当前策略采样（on-policy）；历史数据或行为策略采样（off-policy） | off-policy 时通常需要 Replay Buffer、重要性采样或专门的 Bellman 更新 |
+| 一次更新走多远 | 直接最大化策略梯度目标；或限制新旧策略差异 | 决定训练稳定性；PPO 的裁剪就是后一类约束 |
 
-$$
-\|T^\pi V-T^\pi U\|_\infty
-\le\gamma\|V-U\|_\infty
-$$
+因此可以把后面的算法看成两条主线：
 
-因此反复应用 $T^\pi$ 会收敛到唯一的不动点 $V^\pi$。最优 Bellman 算子同样具有收缩性，这解释了表格型价值迭代为什么能够收敛。
+- **价值方法**：以 Bellman target 训练 $Q/V$，再由价值选动作，例如 Q-Learning、DQN。
+- **直接策略优化**：以 $G_t$ 或 $\hat A_t$ 加权 $\nabla_\theta\log\pi_\theta$，再为稳定性加入 baseline、Critic 或策略更新约束，例如 REINFORCE、PPO。
 
-## 第二部分：强化学习实现
+Actor-Critic 不是与两者并列的单一算法，而是直接策略优化中常用的结构：Actor 更新策略，Critic 用 MC、TD、n-step 或 GAE 等 target 学习价值，并提供 $\hat A_t$。
 
-### 1. 一次 RL 训练迭代的完整闭环
+### 2. 通用训练闭环
 
-工程上可以把一次迭代拆成四步：
+1. 用行为策略 rollout，收集 $(s_t,a_t,r_t,s_{t+1},d_t)$。
+2. 计算 target、return、TD error 或 advantage。
+3. 根据算法损失更新 value/policy 网络。
+4. 在独立环境和多个随机种子上评估平均回报、成功率与方差。
 
-1. **Rollout**：用当前策略与环境交互，收集 $(s_t,a_t,r_{t+1},s_{t+1},d_t)$。
-2. **评估轨迹**：计算回报、价值目标、优势函数和旧策略 log probability。
-3. **更新模型**：根据 value loss、policy loss、熵正则和其他约束项更新参数。
-4. **评估与诊断**：检查平均回报、成功率、轨迹长度、异常轨迹和训练指标，再进入下一轮采样。
+On-policy 算法需要保存当前批次的 old log probability；Off-policy 算法通常维护 Replay Buffer。所有算法都应正确处理终止状态：$d_t=1$ 时，目标中不应包含下一状态价值。
 
-通用训练数据可表示为：
+### 3. Q-Learning、SARSA 与 DQN
 
-$$
-\mathcal{D}_{rollout}
-=\{(s_t,a_t,r_{t+1},d_t,\log\pi_{old}(a_t|s_t),V_{old}(s_t))\}
-$$
-
-实现中最容易出错的是 mask：padding、EOS 之后的 token 和无效动作不能参与 log probability、优势和损失计算。
-
-### 2. 价值方法的实现：Q-Learning 与 DQN
-
-Q-Learning 使用贪心目标更新动作价值：
+Q-Learning（off-policy）：
 
 $$
 Q(s_t,a_t)\leftarrow Q(s_t,a_t)+\alpha
-\left[r_{t+1}+\gamma(1-d_t)\max_{a'}Q(s_{t+1},a')-Q(s_t,a_t)\right]
+\left[r_t+\gamma(1-d_t)\max_{a'}Q(s_{t+1},a')-Q(s_t,a_t)\right]
 $$
 
-DQN 用神经网络 $Q_\theta(s,a)$ 近似 Q 函数，目标网络 $Q_{\theta^-}$ 提供相对稳定的 bootstrap 目标：
+SARSA（on-policy）：
 
 $$
-y_t=r_{t+1}+\gamma(1-d_t)\max_{a'}Q_{\theta^-}(s_{t+1},a')
+Q(s_t,a_t)\leftarrow Q(s_t,a_t)+\alpha
+\left[r_t+\gamma(1-d_t)Q(s_{t+1},a_{t+1})-Q(s_t,a_t)\right]
+$$
+
+DQN 用网络 $Q_\theta$ 近似 Q 函数，并用目标网络 $Q_{\theta^-}$ 稳定 bootstrap：
+
+$$
+y_t=r_t+\gamma(1-d_t)\max_{a'}Q_{\theta^-}(s_{t+1},a')
 $$
 
 $$
-\mathcal{L}_{DQN}(\theta)
-=\mathbb{E}_{(s,a,r,s')\sim\mathcal{D}}
+\mathcal L_{DQN}
+=\mathbb E_{(s,a,r,s')\sim\mathcal D}
 \left[(y_t-Q_\theta(s_t,a_t))^2\right]
 $$
 
-Replay Buffer 打破连续轨迹的相关性；目标网络周期性同步；Double DQN 则把“动作选择”和“动作评估”分开，以减轻 Q 值过估计。DQN 适合离散动作，是理解经验回放、目标网络和 TD 学习的重要实现案例。
+实现关键：Replay Buffer、目标网络、$\epsilon$-greedy 探索；Double DQN 用当前网络选动作、目标网络评估动作，缓解 Q 值过估计。
 
-### 3. Actor-Critic 的实现：GAE 与 PPO 的共同基础
+### 4. REINFORCE
 
-使用 Critic 估计 $V_\phi$ 时，先计算 TD 残差：
+REINFORCE 使用整条轨迹回报：
 
 $$
-\delta_t=r_{t+1}+\gamma(1-d_t)V_\phi(s_{t+1})-V_\phi(s_t)
+\mathcal L_{REINFORCE}
+=-\mathbb E_\tau\left[\sum_t\gamma^t\log\pi_\theta(a_t\mid s_t)G_t\right]
 $$
 
-GAE 用多个 TD 残差的指数加权和估计优势：
+### 5. PPO：GAE 优势估计与裁剪更新
+
+PPO 中常用 GAE 以多步 TD 误差估计优势：
 
 $$
 \hat A_t^{GAE(\gamma,\lambda)}
 =\sum_{l=0}^{T-t-1}(\gamma\lambda)^l\delta_{t+l}
 $$
 
-价值目标通常取：
+PPO 使用新旧策略的概率比：
 
 $$
-\hat V_t^{target}=\hat A_t^{GAE}+V_\phi(s_t)
+r_t(\theta)
+=\frac{\pi_\theta(a_t|s_t)}{\pi_{old}(a_t|s_t)}
+=\exp\left(\log\pi_\theta-\log\pi_{old}\right)
 $$
 
-$\lambda$ 越大越接近 Monte Carlo，方差更高；$\lambda$ 越小越依赖短期 bootstrap，偏差可能更大。实现中通常对有效时间步的优势做标准化，并在反向传播前停止其梯度。
-
-### 4. PPO 的实现
-
-PPO 比较新旧策略对同一个动作的概率：
+裁剪目标：
 
 $$
-r_t(\theta)=\frac{\pi_\theta(a_t|s_t)}{\pi_{old}(a_t|s_t)}
-=\exp\left(\log\pi_\theta(a_t|s_t)-\log\pi_{old}(a_t|s_t)\right)
+\mathcal L_{PPO}^{clip}
+=\mathbb E\left[
+\min\left(r_t\hat A_t,
+\mathrm{clip}(r_t,1-\epsilon,1+\epsilon)\hat A_t\right)
+\right]
 $$
 
-裁剪策略目标为：
+实现关键：保存 old log probability；对同一批 rollout 做有限轮 minibatch 更新；监控 approximate KL、clip fraction、entropy、value loss 和梯度范数。
 
-$$
-\mathcal{L}_{PPO}^{clip}
-=\mathbb{E}\left[\min\left(
- r_t(\theta)\hat A_t,
- \mathrm{clip}(r_t(\theta),1-\epsilon,1+\epsilon)\hat A_t
-\right)\right]
-$$
+### 6. 其他常见算法
 
-实际最小化的总损失通常写为：
+| 算法 | 核心思想 | 适用场景 |
+| --- | --- | --- |
+| A2C/A3C | 同步/异步 Actor-Critic | 通用基线 |
+| DDPG | 确定性策略梯度 + Replay Buffer | 连续动作 |
+| TD3 | 双 Critic、延迟策略更新 | 连续动作，减轻过估计 |
+| SAC | 最大熵 Actor-Critic | 连续动作，样本效率较高 |
+| Offline RL | 只用固定数据集学习 | 无法安全在线交互 |
 
-$$
-\mathcal{L}_{total}
-=-\mathcal{L}_{PPO}^{clip}
-+c_v\mathcal{L}_{critic}
--c_H\mathcal{H}(\pi_\theta)
-+c_{KL}\mathcal{L}_{KL}
-$$
-
-PPO 的关键实现点：保存 rollout 时的 old log probability；更新时对同一批数据进行有限轮数和 minibatch 训练；监控 ratio、clip fraction、KL 和 entropy，过大时提前停止或降低学习率。
-
-## 第三部分：其他强化学习方法与专题
-
-### 1. 经典算法地图
-
-| 方法 | 主要对象 | On/Off-policy | 适用动作 | 关键思想 |
-| --- | --- | --- | --- | --- |
-| DP | $V/Q$ | 不适用 | 离散为主 | 已知环境模型，策略/价值迭代 |
-| MC | $V/Q$ | On-policy 常见 | 离散或连续 | 用完整回报估计价值 |
-| TD(0) | $V/Q$ | On-policy 常见 | 离散或连续 | 一步 bootstrap |
-| Q-Learning | $Q$ 表 | Off-policy | 离散 | 对下一动作取最大值 |
-| SARSA | $Q$ 表 | On-policy | 离散 | 使用实际采样的下一动作 |
-| DQN | 神经网络 $Q$ | Off-policy | 离散 | Replay Buffer + 目标网络 |
-| REINFORCE | 策略 | On-policy | 离散或连续 | Monte Carlo 策略梯度 |
-| A2C/A3C | Actor + Critic | On-policy | 离散或连续 | 用 Critic 降低策略梯度方差 |
-| PPO | Actor + Critic | On-policy | 离散或连续 | 概率比裁剪 |
-| DDPG/TD3 | Actor + Critic | Off-policy | 连续 | 确定性策略梯度 |
-| SAC | Actor + Critic | Off-policy | 连续 | 最大熵强化学习 |
-
-### 2. SARSA 与 Q-Learning 的差异
-
-SARSA 使用实际执行的下一动作，是 on-policy 方法：
-
-$$
-Q(s_t,a_t)\leftarrow Q(s_t,a_t)+\alpha
-\left[r_{t+1}+\gamma(1-d_t)Q(s_{t+1},a_{t+1})-Q(s_t,a_t)\right]
-$$
-
-Q-Learning 使用下一状态的贪心动作，是 off-policy 方法：
-
-$$
-Q(s_t,a_t)\leftarrow Q(s_t,a_t)+\alpha
-\left[r_{t+1}+\gamma(1-d_t)\max_{a'}Q(s_{t+1},a')-Q(s_t,a_t)\right]
-$$
-
-Q-Learning 通常更激进地逼近最优策略，SARSA 则会把行为策略的探索风险反映到更新中。它们是理解“行为策略”和“目标策略”差异的好例子。
-
-### 3. 连续控制：DDPG、TD3 与 SAC
-
-DDPG 使用确定性 Actor $a=\mu_\theta(s)$ 和 Critic $Q_\phi(s,a)$，Actor 通过 Critic 的梯度更新：
-
-$$
-\nabla_\theta J(\theta)
-\approx\mathbb{E}_s
-\left[\nabla_a Q_\phi(s,a)|_{a=\mu_\theta(s)}
-\nabla_\theta\mu_\theta(s)\right]
-$$
-
-TD3 在 DDPG 上加入双 Critic、目标策略平滑和延迟 Actor 更新，以减轻 Q 值过估计。SAC 则最大化奖励与策略熵之和：
-
-$$
-J(\pi)=\mathbb{E}_{\pi}
-\left[\sum_t r_{t+1}+\alpha\mathcal{H}(\pi(\cdot|s_t))\right]
-$$
-
-SAC 适合连续控制，LLM token 动作本质上是离散动作，因此不能直接把 SAC 当作 PPO/GRPO 的替代品；但其最大熵、温度系数和 off-policy 经验复用思想仍有参考价值。
-
-### 4. 离线强化学习
-
-离线 RL 只使用固定数据集：
-
-$$
-\mathcal{D}=\{(s,a,r,s')\}
-$$
-
-它不能通过新交互纠正分布外动作，因此主要风险是 OOD action 导致价值函数过估计。常见思路包括：
-
-- 行为克隆约束策略接近数据分布。
-- 保守 Q 学习，惩罚对未见动作的过高估计。
-- 支持集约束，只在数据分布覆盖的区域内优化。
-- 重要性采样或 Doubly Robust 等方法进行离线策略评估。
-
-在 LLM 场景中，历史 SFT 数据、偏好数据和旧策略生成数据都可能构成离线数据，但直接把离线偏好数据当作在线 RL 数据使用时，需要注意策略分布偏移。
+实践中先判断动作空间与数据来源：离散动作优先理解 Q-Learning/DQN；连续动作看 TD3/SAC；需要稳定的 on-policy 策略优化时看 PPO。
